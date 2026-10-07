@@ -1,0 +1,52 @@
+Beta Version 0.3.2 alpha
+* Bug résolus
+  - Latence des caméras en direct : l'image n'attend plus la fin de l'analyse. Chaque image de la
+    caméra est affichée dès sa réception (25 images/s même si l'analyse n'en traite que 4) ; les
+    cadres de détection suivent la dernière analyse.
+  - Mode faible latence pour RTSP, RTMP, UDP et SRT (plus de mémoire tampon réseau FFmpeg).
+    Désactivable dans Réglages › Système si un flux saccade sur un réseau instable.
+  - Webcams sous Windows : DirectShow en priorité (ouverture rapide, moins de retard), Media
+    Foundation en repli (Réglages › Système › réglages avancés).
+  - Affichage plus léger : l'image n'est redimensionnée qu'une fois par nouvelle image.
+  - Sans carte graphique, PyTorch laisse des cœurs libres pour le décodage vidéo.
++ Ajouts
+  - Sous le nom de la caméra : images/s affichées, délai d'affichage, durée et rythme de l'analyse.
+
+Beta Version 0.3.1 alpha
+* Bug résolus
+  - « RuntimeError: Internal C++ object (QPropertyAnimation) already deleted » en changeant de page
+    rapidement : le fondu des pages est maintenant sûr, même avec des clics très rapides.
+
+Beta Version 0.3 alpha
+* Bug résolus
+  - Timeout « [Caméra] Erreur : FOREIGN KEY constraint failed » : se produisait quand une personne
+    suivie par une caméra était supprimée ou fusionnée. Les actions sont maintenant rattachées à la
+    bonne fiche (ou enregistrées sans personne), les noms suivis se mettent à jour, et une erreur de
+    base de données n'arrête plus jamais une caméra.
+  - Directs YouTube et liens de pages en direct : détection fiable du direct, lecture sans retard
+    qui s'accumule, analyse active pendant la lecture.
+  - « Requested format is not available » sur certains sites : sélection de format plus tolérante.
++ Ajouts
+  - Journal réparti en catégories prédéfinies (Liste noire, Alertes, Personnes surveillées,
+    Identifications, Passages, Zone et stationnement, Véhicules et plaques), avec compteurs,
+    filtre, couleur, et création de vos propres catégories avec règles automatiques
+    (type d'action, catégorie de personne, caméra, mots-clés). Classement manuel par clic droit.
+    Export CSV avec la colonne Catégories.
+  - Catégorie « Liste noire » pour les personnes et liste noire de plaques : alerte prioritaire
+    immédiate (mail et notifications sans délai anti-spam), mise en évidence dans le journal.
+  - Module de notifications : Telegram (avec photo), WhatsApp (CallMeBot gratuit ou Twilio),
+    SMS et appel téléphonique (Twilio), notification push ntfy (avec photo), Discord, webhook.
+    Bouton de test par canal, délai anti-spam, notification par catégorie du journal.
+  - Vérification et installation des mises à jour depuis GitHub (releases ou version.json),
+    avec notes de version, sauvegarde automatique du code et conservation des données.
+  - Mode développeur (7 clics sur la version dans À propos) : nom, sous-titre, version affichée,
+    titre de fenêtre, logo, badge DEV, édition de version.json, éditeur de config.json avec
+    vérification, préparation d'une archive de publication.
+  - Numérotation alignée sur vos versions : 0.3 alpha (fichier version.json).
+  - Fenêtre « Nouveautés » dans À propos.
+
+Beta Version 0.2 alpha
+* Bug résolus
+  - Compatibilité yt-dlp résolue.
+/ Bug
+  - Timeout [06/10 17:48:34] [Caméra 1] Erreur : FOREIGN KEY constraint failed (corrigé en 0.3).
