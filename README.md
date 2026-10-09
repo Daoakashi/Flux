@@ -2,7 +2,7 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Version actuelle : 0.7.0 alpha** · [Notes de version](CHANGELOG.txt)
+**Version actuelle : 0.8.0 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 
@@ -17,6 +17,10 @@ Guides détaillés : [LISEZMOI.txt](LISEZMOI.txt) (Windows) et [LISEZMOI-LINUX.t
 ## Mises à jour
 
 Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Réglages › Mises à jour. Vos réglages, votre base de données et vos modèles ne sont jamais remplacés.
+
+## FluxLite (application Android)
+
+Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. Activez le serveur dans la page **FluxLite**, puis scannez le QR code depuis l'application. Chaque entreprise ne voit que les caméras que vous lui attribuez. Connexion chiffrée et liée à la clé de ce PC ; la clé est conservée par les mises à jour (dossier `fluxlite`, à sauvegarder).
 
 ## Configuration conseillée
 

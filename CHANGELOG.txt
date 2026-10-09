@@ -1,3 +1,25 @@
+Beta Version 0.8.0 alpha
++ Ajouts
+  - FluxLite : application Android pour vos clients. Nouvelle page « FluxLite » dans la barre latérale.
+    Chaque PC Flux devient un petit serveur privé : les clients créent leur compte depuis le téléphone
+    (nom, prénom, mail, mot de passe), vous les validez et les rattachez à une entreprise
+    (Entreprise A › Client 1A, Client 2A…). Chaque entreprise voit seulement les caméras que vous cochez.
+  - Clé du serveur et QR code d'appairage : créés une seule fois, rangés dans le dossier « fluxlite »
+    que les mises à jour ne touchent jamais (la clé ne change pas d'une version à l'autre).
+  - Connexion chiffrée (HTTPS, TLS 1.2+) liée à la clé du serveur : le téléphone refuse tout autre
+    ordinateur, même sur un Wi-Fi public. Mots de passe stockés seulement sous forme d'empreinte (scrypt),
+    sessions révocables, blocage de 15 min après 5 essais ratés.
+  - Vidéo en direct sur le téléphone, alertes en temps réel avec photo, journal des alertes, gestion du
+    compte (droits RGPD : export et suppression des données depuis l'application).
+  - Gestion des comptes sur le PC : valider, changer d'entreprise, suspendre, réinitialiser le mot de passe,
+    déconnecter tous les appareils, supprimer. Pastille sur « FluxLite » quand un compte attend.
+  - Réglages › FluxLite : port, nom du serveur, inscriptions, validation, responsable RGPD, qualité vidéo.
+* À savoir pour la mise à jour
+  - Nouvelles dépendances (cryptography, segno) : relancez installer.bat (Windows) ou installer.sh (Linux)
+    une fois après la mise à jour.
+  - Windows demande d'autoriser Flux dans le pare-feu au premier démarrage du serveur : acceptez pour le
+    réseau privé.
+
 Beta Version 0.7.0 alpha
 + Ajouts
   - Résolution du flux en direct : affichée sur l'image (ex. 1920×1080), sous le nom de la caméra et

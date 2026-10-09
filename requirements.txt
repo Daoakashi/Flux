@@ -22,5 +22,9 @@ rapidocr>=3.0
 # Vidéos des passages (ffmpeg intégré : MP4 H.264 lisible sur téléphone)
 imageio-ffmpeg>=0.5
 
+# FluxLite (application Android) : chiffrement TLS et QR code d'appairage
+cryptography>=42
+segno>=1.6
+
 # Liens YouTube, Instagram, etc.
 yt-dlp[default]>=2026.8.19  # inclut yt-dlp-ejs, requis pour YouTube (avec Deno)
