@@ -919,6 +919,9 @@ class PageCameras(QWidget):
             d.nom = d.pipeline.nom = d.clips.nom = nom
         for g in self.groupes:
             g.camera_renommee(ancien, nom)
+        mobile = getattr(self.fen, "page_mobile", None)
+        if mobile is not None:  # FluxLite : les entreprises gardent l'accès à la caméra renommée
+            mobile.camera_renommee(ancien, nom)
         self.sauver()
         self.fen.toast(f"« {ancien} » renommée en « {nom} ».", "ok")
 

@@ -23,7 +23,9 @@ BRUT = os.environ.get("FLUX_GITHUB_BRUT", "https://raw.githubusercontent.com")
 
 # Jamais remplacés ni sauvegardés : données de l'utilisateur
 PROTEGES = {"config.json", "flux.db", "flux.db-wal", "flux.db-shm", "plaques.pt", "flux.ico", "flux.png", "flux_erreur.log"}
-DOSSIERS_PROTEGES = {"venv", ".venv", "outils", "modeles", "detections", "sauvegardes", "publication", ".git", "__pycache__"}
+# « fluxlite » : clé du serveur FluxLite, comptes des clients. Jamais remplacé : la clé ne change pas.
+DOSSIERS_PROTEGES = {"venv", ".venv", "outils", "modeles", "detections", "sauvegardes", "publication", "fluxlite", ".git",
+                     "__pycache__"}
 RANG_CANAL = {"alpha": 0, "a": 0, "beta": 1, "b": 1, "rc": 2, "stable": 3, "": 3}
 
 
