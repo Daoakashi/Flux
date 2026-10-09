@@ -1,3 +1,44 @@
+Beta Version 0.7.0 alpha
++ Ajouts
+  - Résolution du flux en direct : affichée sur l'image (ex. 1920×1080), sous le nom de la caméra et
+    sur chaque vignette des groupes (pour une zone : la taille réelle de la partie recadrée).
+  - Plusieurs zones précises par caméra : dessinez autant de rectangles que vous voulez sur l'image.
+    Chaque zone a un nom (« Porte », « Allée »…), se renomme ou se supprime par clic droit ou depuis la
+    liste « Zones » à droite. Les entrées et sorties du journal indiquent le nom de la zone.
+  - Groupes de flux à partir de zones : dans un groupe, cochez des caméras entières ou des zones précises
+    (« Caméra › Zone »). Une zone s'affiche seule, recadrée et agrandie, sans créer de flux individuel :
+    une seule connexion et une seule analyse par caméra. Renommer une caméra ou une zone met les groupes
+    à jour tout seuls.
+  - ONVIF modifiable pendant que le flux tourne : nouvelle section « Caméra ONVIF » à droite avec le choix
+    du profil vidéo (principal, secondaire… avec leur résolution) ; changer de profil relance le flux sur
+    le nouveau profil en quelques secondes. « Modifier la connexion… » change l'adresse, l'identifiant ou
+    le mot de passe sans supprimer la caméra (zones, groupes et réglages gardés).
+  - Toute caméra : « Renommer la caméra… », et la source se modifie en marche (Entrée pour appliquer).
+  - Bouton « GitHub » dans À propos. Le dépôt officiel des mises à jour est maintenant
+    github.com/Daoakashi/Flux (déjà réglé : rien à saisir).
+* Performances (processeur et carte graphique)
+  - Nouveau moteur OpenVINO, choisi automatiquement sans carte NVIDIA : analyse 1,5 à 3 fois plus rapide
+    sur les processeurs Intel et AMD (mini-PC compris), mêmes détections. Le modèle est converti une seule
+    fois (pendant l'installation, ou environ une minute au premier démarrage). Réglages › Détection ›
+    Moteur d'analyse : Automatique, PyTorch, OpenVINO ou ONNX Runtime.
+  - Puce graphique Intel utilisable (Réglages › Détection › Processeur de calcul › Puce graphique Intel).
+  - Analyse en veille quand rien ne bouge : une image vide et immobile n'est plus analysée en continu
+    (vérification toutes les 2 s) ; l'analyse reprend dès le premier mouvement. Le processeur libéré sert
+    aux autres caméras. Automatique sans carte NVIDIA (Réglages › Détection).
+  - Analyse recadrée sur les zones : avec des zones dessinées, la détection porte sur le rectangle qui les
+    entoure, en plus haute résolution. Les personnes lointaines dans la zone sont mieux détectées et
+    l'analyse est plus rapide.
+  - Carte NVIDIA : noyaux cuDNN optimisés pour la taille d'image (cudnn.benchmark, TF32).
+  - Petits processeurs (4 cœurs ou moins) : PyTorch utilise tous les cœurs sauf un (au lieu de deux).
+  - Le moteur utilisé est affiché dans la barre d'état et sous le nom de chaque caméra.
+* Bug résolus
+  - Sous-titre des caméras trop long, coupé par les boutons : raccourci (délai d'affichage en infobulle).
+* À savoir pour la mise à jour
+  - Nouvelle dépendance (OpenVINO) : après l'installation par Flux, fermez-le et relancez installer.bat
+    (Windows) ou installer.sh (Linux) une fois. Flux le rappelle à la fin de la mise à jour.
+  - L'ancienne zone unique de chaque caméra devient « Zone 1 » : rien n'est perdu.
+  - Changer de moteur d'analyse relance automatiquement les caméras en marche.
+
 Beta Version 0.3.3 alpha
 * Bug résolus
   - « Impossible de charger le modèle yolo26s.pt : 416 Client Error: Range Not Satisfiable » :
@@ -10,6 +51,15 @@ Beta Version 0.3.3 alpha
     puis sonde directement chaque adresse du réseau local si aucune caméra n'a répondu.
   - Image de webcam brouillée (violet, bandes) : retour au pilote Windows par défaut ; DirectShow
     reste disponible dans Réglages › Système › Pilote des webcams. Mode faible latence adouci.
+  - PC sans Microsoft Visual C++ : « WinError 126 … torch\lib\c10.dll introuvable » et modèles
+    impossibles à charger. installer.bat installe maintenant Visual C++ lui-même (autorisation
+    Windows à accepter), vérifie que PyTorch démarre et le répare sinon. Flux explique l'erreur
+    au lieu d'afficher seulement le nom de la DLL.
+  - Deno et ffmpeg ne s'installaient pas sur les PC sans winget : ils sont maintenant téléchargés
+    directement dans le dossier « outils » de Flux, trouvés sans redémarrer la session.
+  - Modèles : installer.bat les télécharge pendant l'installation (détection + visages) et dit
+    pourquoi un téléchargement échoue (pas d'Internet, pare-feu, certificat refusé). Repli sur
+    les certificats de « certifi » quand ceux de Windows sont périmés.
 + Ajouts
   - Groupes de caméras : plusieurs caméras affichées côte à côte dans un seul onglet (mur vidéo).
     Ajouter › « Groupe de caméras (plusieurs vues)… » : nom, caméras cochées, ordre, nombre de

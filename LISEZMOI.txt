@@ -1,4 +1,5 @@
-FLUX 0.3.3 alpha — Surveillance vidéo intelligente
+FLUX 0.7.0 alpha — Surveillance vidéo intelligente
+Dépôt officiel et mises à jour : https://github.com/Daoakashi/Flux
 ==================================================
 
 INSTALLATION (Windows)
@@ -6,10 +7,14 @@ INSTALLATION (Windows)
 1) Décompressez l'archive dans un dossier à vous (pas dans l'ancien dossier « yolp »).
 2) Double-cliquez sur installer.bat. Il s'occupe de tout :
      - Python 3.12 (installé si absent ; relancez alors installer.bat une seconde fois)
+     - Microsoft Visual C++ (indispensable à PyTorch) : Windows demande l'autorisation, cliquez
+       sur « Oui ». Si Windows demande de redémarrer, redémarrez avant de lancer Flux.
      - l'environnement « venv » dans ce dossier
-     - PyTorch avec CUDA si une carte NVIDIA est présente (plusieurs Go)
+     - PyTorch avec CUDA si une carte NVIDIA est présente (plusieurs Go), sinon version processeur
      - toutes les dépendances, yt-dlp à jour, OpenCV maintenu en version 4
-     - Deno (YouTube) et ffmpeg (vidéos téléchargées avec le son), via winget
+     - Deno (YouTube) et ffmpeg (son des vidéos téléchargées), rangés dans le dossier « outils »
+       (téléchargement direct : winget n'est plus nécessaire)
+     - les modèles de détection et de visages, pour que Flux démarre sans rien télécharger
      - une vérification finale et un raccourci « Flux » sur le bureau
    installer.bat peut être relancé à tout moment : il répare et met à jour sans tout réinstaller.
 3) Lancez Flux avec le raccourci du bureau ou Flux.bat.
@@ -23,6 +28,15 @@ MISE À JOUR DEPUIS UNE VERSION PRÉCÉDENTE
 Linux (Linux Mint, Ubuntu, Debian) : utilisez l'archive « linux » (installer.sh).
 
 Si Flux ne démarre pas, une fenêtre explique l'erreur et le détail est écrit dans flux_erreur.log.
+
+PROBLÈMES D'INSTALLATION FRÉQUENTS (Windows)
+  « c10.dll », « WinError 126 », « DLL load failed » ou un message qui renvoie vers
+  aka.ms/vs/17/release/vc_redist.x64.exe : Microsoft Visual C++ manque. Relancez installer.bat (il
+  l'installe ; acceptez l'autorisation), ou installez ce lien à la main, puis REDÉMARREZ le PC.
+  Il faut un compte administrateur, ou le mot de passe d'un administrateur, pour l'installer.
+  Modèles impossibles à télécharger : installer.bat affiche la raison (pas d'Internet, pare-feu,
+  antivirus qui filtre HTTPS, Windows pas à jour). Sinon, téléchargez yolo26n.pt depuis
+  https://github.com/ultralytics/assets/releases et placez-le dans le dossier « modeles ».
 
 Installation manuelle (avancé) : créez un venv Python 3.10–3.13, installez PyTorch avec CUDA depuis
 https://pytorch.org/get-started/locally/, puis « pip install -r requirements.txt » et « python flux.py ».
@@ -47,7 +61,14 @@ meilleure solution.
 FONCTIONS
 ---------
 - Caméras : webcam, RTSP/HTTP, fichiers, liens web (YouTube en direct…), caméras ONVIF
-  (recherche automatique sur le réseau, connexion et choix du profil vidéo).
+  (recherche automatique sur le réseau, connexion et choix du profil vidéo). La résolution du flux
+  s'affiche en direct sur l'image. Nom et source modifiables pendant que la caméra tourne.
+- Caméras ONVIF en marche : section « Caméra ONVIF » à droite. Choisissez le profil vidéo (principal en
+  haute résolution, secondaire plus léger…) : le flux redémarre sur ce profil en quelques secondes.
+  « Modifier la connexion… » change l'adresse, l'identifiant ou le mot de passe sans perdre la caméra.
+- Zones : dessinez un ou plusieurs rectangles sur l'image d'une caméra. La détection se limite aux
+  zones et se concentre sur elles (meilleure détection de loin), le journal note « Entrée dans
+  « Porte » »… Clic droit sur une zone, ou liste « Zones » à droite : renommer, supprimer.
 - Visages : détection (YuNet), reconnaissance (SFace), expressions (HSEmotion).
   Les visages inconnus deviennent « Inconnu 1, 2… » ; renommez-les dans la page Personnes,
   fusionnez les doublons, ajoutez des photos. Catégories : connue, inconnue, surveillée,
@@ -58,9 +79,9 @@ FONCTIONS
   YOLO spécialisé nommé « plaques.pt » à côté de flux.py pour une détection plus fiable.
 - Lecteur : YouTube, Instagram, TikTok, Vimeo, fichiers… avec le son et l'analyse en direct.
   Instagram et les vidéos privées : Réglages › Lecteur vidéo › Cookies du navigateur.
-  YouTube exige un moteur JavaScript : installez Deno (winget install DenoLand.Deno),
+  YouTube exige un moteur JavaScript : Deno (installé par installer.bat dans « outils »),
   puis gardez yt-dlp à jour : pip install -U "yt-dlp[default]" (YouTube change souvent).
-  Mode « Télécharger puis lire » en meilleure qualité : installez ffmpeg (winget install ffmpeg).
+  Mode « Télécharger puis lire » en meilleure qualité : ffmpeg (installé par installer.bat).
 - Alertes : notification, photo, mail (délai anti-spam), journal par mail.
 - Journal : actions réparties en catégories (Liste noire, Alertes, Personnes surveillées,
   Identifications, Passages, Zone et stationnement, Véhicules et plaques). Bouton « Catégories… »
@@ -74,6 +95,10 @@ GROUPES DE CAMÉRAS (plusieurs vues dans une seule fenêtre)
 Page Caméras › Ajouter › « Groupe de caméras (plusieurs vues)… ». Donnez un nom, cochez les caméras
 à réunir (flèches Monter / Descendre pour l'ordre) et choisissez la disposition (automatique : 2 caméras
 côte à côte, 3-4 en carré, puis 3 ou 4 colonnes). Le groupe apparaît comme un onglet « ▦ ».
+Zones dans un groupe : sous chaque caméra, la liste propose ses zones (« ▸ Porte (Entrée) »). Une zone
+cochée s'affiche seule, recadrée et agrandie, comme une caméra à part, sans créer de flux individuel :
+plusieurs zones précises d'une même caméra forment un groupe pour le prix d'une seule connexion et d'une
+seule analyse. Dessinez d'abord les zones sur l'image de la caméra.
   - Double-clic sur une vignette : elle remplit le groupe ; double-clic encore : retour à la grille.
   - Clic droit : agrandir, ouvrir la page de la caméra, la démarrer ou l'arrêter, la retirer du groupe.
   - « Plein écran » : le mur seul, idéal pour un écran dédié ; Échap ou F11 pour revenir.
@@ -118,15 +143,29 @@ Les catégories du journal marquées « Notifier » envoient aussi leurs actions
 Les jetons et clés sont enregistrés dans config.json : ne partagez pas ce fichier (l'export des
 réglages, lui, les retire).
 
+PERFORMANCES (Réglages › Détection)
+-----------------------------------
+  - Moteur d'analyse « Automatique » : PyTorch sur carte NVIDIA (demi-précision), OpenVINO sur
+    processeur Intel ou AMD (1,5 à 3 fois plus rapide). La conversion du modèle se fait une seule fois
+    (pendant l'installation ou au premier démarrage d'une caméra), puis elle est gardée dans « modeles ».
+  - « Puce graphique Intel » (Processeur de calcul) : utilise la puce graphique intégrée des PC Intel
+    avec OpenVINO. Essayez-la sur un mini-PC ; revenez à « Automatique » si c'est plus lent.
+  - « Analyser seulement quand ça bouge » : sans personne à l'image et sans mouvement, l'analyse se met en
+    veille (vérification toutes les 2 s) et reprend au premier mouvement. Le sous-titre de la caméra
+    affiche « analyse en veille ».
+  - Avec des zones, l'analyse porte seulement sur le rectangle qui les entoure (plus rapide, plus précis).
+  - Le moteur utilisé est indiqué dans la barre d'état et sous le nom de chaque caméra.
+
 MISES À JOUR PAR GITHUB
 -----------------------
-Réglages › Mises à jour : indiquez le dépôt (propriétaire/dépôt). Flux vérifie au démarrage et
-propose l'installation : le code actuel est d'abord sauvegardé dans « sauvegardes », puis seul le
-code est remplacé (réglages, base, modèles et venv conservés). Si requirements.txt change, Flux
-demande de relancer installer.bat.
+Le dépôt officiel est déjà réglé : https://github.com/Daoakashi/Flux (Réglages › Mises à jour, champ
+vide = ce dépôt). Flux vérifie au démarrage et propose l'installation : le code actuel est d'abord
+sauvegardé dans « sauvegardes », puis seul le code est remplacé (réglages, base, modèles et venv
+conservés). Si requirements.txt change, Flux demande de relancer installer.bat.
 Pour publier une version : mode développeur › augmentez la version (version.json) ›
-« Préparer une publication » › sur GitHub, Releases › Draft a new release, tag v0.3.1 (cochez
-« Set as a pre-release » pour alpha et beta), joignez le zip du dossier « publication ».
+« Préparer une publication » › sur GitHub, Releases › Draft a new release, tag v0.7.0-alpha (cochez
+« Set as a pre-release » pour alpha et beta). Inutile de joindre un zip : Flux télécharge le code de
+la release. Le tag doit correspondre à version.json (0.7.0 + alpha = v0.7.0-alpha).
 Sans release, Flux compare aussi le version.json de la branche principale.
 
 MODE DÉVELOPPEUR

@@ -541,7 +541,8 @@ class Logo(QWidget):
 # Vue vidéo : image + repères de cadrage animés + zone d'intérêt
 # ---------------------------------------------------------------------------
 class VueVideo(QWidget):
-    zoneChangee = Signal(object)
+    zoneChangee = Signal(object)     # ancienne API (une seule zone) : première zone ou None
+    zonesChangees = Signal(object)   # liste de zones {"nom", "rect": (x1, y1, x2, y2) normalisés}
     doubleClique = Signal()
     CATEGORIES = (("vehicules", "o_vehicule"), ("personnes", "o_personne"), ("visages", "o_visage"),
                   ("plaques", "o_plaque"))
@@ -558,7 +559,8 @@ class VueVideo(QWidget):
         self._cache = None
         self._taille = (1, 1)
         self._boites = {c: [] for c, _ in self.CATEGORIES}
-        self._zone = None
+        self._zones = []
+        self._trace = None  # rectangle en cours de dessin
         self._glisse = None
         self._etat, self._statut, self._compteurs, self._fps = "arret", "Aucun flux", [], 0.0
         self._badges = []
@@ -616,7 +618,24 @@ class VueVideo(QWidget):
             self._boites[c] = []
 
     def definir_zone(self, zone):
-        self._zone = tuple(zone) if zone else None
+        self.definir_zones([{"nom": "Zone 1", "rect": tuple(zone)}] if zone else [])
+
+    def definir_zones(self, zones):
+        self._zones = [{"nom": str(z.get("nom") or f"Zone {i + 1}"), "rect": tuple(z["rect"])}
+                       for i, z in enumerate(zones or []) if z and z.get("rect")]
+
+    def zones(self):
+        return [dict(z, rect=list(z["rect"])) for z in self._zones]
+
+    def _emettre_zones(self):
+        self.zonesChangees.emit(self.zones())
+        self.zoneChangee.emit(tuple(self._zones[0]["rect"]) if self._zones else None)
+
+    def _nom_libre(self):
+        noms, i = {z["nom"] for z in self._zones}, len(self._zones) + 1
+        while f"Zone {i}" in noms:
+            i += 1
+        return f"Zone {i}"
 
     def regler_etat(self, etat, statut, compteurs=(), fps=0.0, badges=()):
         self._etat, self._statut, self._compteurs, self._fps, self._badges = etat, statut, list(compteurs), fps, list(badges)
@@ -663,29 +682,60 @@ class VueVideo(QWidget):
         iw, ih = self._taille
         return (min(max((pos.x() - ox) / s / iw, 0.0), 1.0), min(max((pos.y() - oy) / s / ih, 0.0), 1.0))
 
+    def _zone_sous(self, pos):
+        x, y = self._vers_norm(pos)
+        for i in range(len(self._zones) - 1, -1, -1):
+            x1, y1, x2, y2 = self._zones[i]["rect"]
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                return i
+        return None
+
     def mousePressEvent(self, e):
         if self._image is None or not self.zone_active:
             return
         if e.button() == Qt.MouseButton.RightButton:
-            self._zone = None
-            self.zoneChangee.emit(None)
+            self._menu_zones(e)
         elif e.button() == Qt.MouseButton.LeftButton:
             self._glisse = self._vers_norm(e.position())
+
+    def _menu_zones(self, e):
+        from PySide6.QtWidgets import QInputDialog, QMenu
+        i = self._zone_sous(e.position())
+        m = QMenu(self)
+        if i is not None:
+            nom = self._zones[i]["nom"]
+
+            def renommer():
+                nouveau, ok = QInputDialog.getText(self, "Renommer la zone", "Nom de la zone :", text=nom)
+                if ok and nouveau.strip():
+                    self._zones[i]["nom"] = nouveau.strip()
+                    self._emettre_zones()
+
+            def supprimer():
+                del self._zones[i]
+                self._emettre_zones()
+            m.addAction(f"Renommer « {nom} »…", renommer)
+            m.addAction(f"Supprimer « {nom} »", supprimer)
+        if self._zones:
+            m.addSeparator()
+            m.addAction("Effacer toutes les zones", lambda: (self._zones.clear(), self._emettre_zones()))
+        if not m.isEmpty():
+            m.exec(e.globalPosition().toPoint())
 
     def mouseMoveEvent(self, e):
         if self._glisse is not None:
             x1, y1 = self._glisse
             x2, y2 = self._vers_norm(e.position())
-            self._zone = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+            self._trace = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
 
     def mouseReleaseEvent(self, e):
         if self._glisse is None:
             return
         self._glisse = None
-        z = self._zone
-        if z is not None and (z[2] - z[0] < 0.02 or z[3] - z[1] < 0.02):
-            self._zone = None
-        self.zoneChangee.emit(self._zone)
+        z, self._trace = self._trace, None
+        if z is not None and z[2] - z[0] >= 0.02 and z[3] - z[1] >= 0.02:
+            self._zones.append({"nom": self._nom_libre(), "rect": z})
+            self._emettre_zones()
 
     # --- dessin -------------------------------------------------------------------------
     def paintEvent(self, _):
@@ -750,23 +800,36 @@ class VueVideo(QWidget):
                    self._statut if self._etat != "arret" or self._statut else self.message_vide)
 
     def _dessiner_zone(self, p, now, rect_img):
-        if self._zone is None:
+        rects = [(z["nom"], z["rect"]) for z in self._zones] + ([("", self._trace)] if self._trace else [])
+        if not rects:
             return
         ox, oy, s = self._geom
         iw, ih = self._taille
-        x1, y1, x2, y2 = self._zone
-        zr = QRectF(ox + x1 * iw * s, oy + y1 * ih * s, (x2 - x1) * iw * s, (y2 - y1) * ih * s)
+        geo = [(nom, QRectF(ox + x1 * iw * s, oy + y1 * ih * s, (x2 - x1) * iw * s, (y2 - y1) * ih * s))
+               for nom, (x1, y1, x2, y2) in rects]
         sombre = QPainterPath()
         sombre.addRect(rect_img)
-        trou = QPainterPath()
-        trou.addRect(zr)
-        p.fillPath(sombre.subtracted(trou), QColor(0, 0, 0, 120))
+        trous = QPainterPath()
+        for _, zr in geo:
+            trous.addRect(zr)
+        p.fillPath(sombre.subtracted(trous.simplified()), QColor(0, 0, 0, 120))
         pen = QPen(couleur("o_plaque"), 1.8, Qt.PenStyle.CustomDashLine)
         pen.setDashPattern([5, 4])
         pen.setDashOffset((now * 14) % 9 if T.animations else 0)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(zr, 4, 4)
+        p.setFont(police(max(9, T.taille - 3), True))
+        fm = QFontMetrics(p.font())
+        for nom, zr in geo:
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(zr, 4, 4)
+            if nom and zr.width() > 30:
+                texte = fm.elidedText(nom, Qt.TextElideMode.ElideRight, int(zr.width()) - 8)
+                r = QRectF(zr.left() + 4, zr.top() + 4, fm.horizontalAdvance(texte) + 12, fm.height() + 4)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(couleur("o_plaque", 225))
+                p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+                p.setPen(QColor(8, 14, 26))
+                p.drawText(r, Qt.AlignmentFlag.AlignCenter, texte)
 
     @staticmethod
     def _crochets(p, rect, couleur_, longueur, epaisseur):
@@ -883,6 +946,11 @@ class VueVideo(QWidget):
         p.setPen(QColor(235, 242, 252))
         p.drawText(QRectF(r.left() + 21, r.top(), w - 24, r.height()),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, texte)
+        if len(self._badges) > 1 and cadre.width() - w > 120:  # résolution, en haut à droite
+            p.setFont(police(max(9, T.taille - 3)))
+            p.setPen(QColor(235, 242, 252, 200))
+            p.drawText(QRectF(cadre.right() - 110, cadre.top() + 8, 100, 22),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self._badges[1])
         if self._etat in ("alerte", "chargement") and self._statut and cadre.width() > 230:
             p.setFont(police(max(9, T.taille - 3)))
             p.setPen(QColor(235, 242, 252, 220))

@@ -65,7 +65,8 @@ if [ -f /etc/os-release ]; then . /etc/os-release; info "Systeme : ${PRETTY_NAME
 etape 2 "Paquets du systeme..."
 PAQUETS="python3 python3-venv python3-pip ffmpeg curl unzip zenity libgl1 libegl1 libglib2.0-0 libdbus-1-3 \
 libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libsm6 libxext6"
+libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libsm6 libxext6 \
+intel-opencl-icd"
 if command -v apt-get >/dev/null 2>&1; then
     SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
     if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then
@@ -178,13 +179,9 @@ elif [ "$CODE" -ne 0 ]; then
     alerte "Un module ne se charge pas correctement ; details ci-dessous."
 fi
 "$VPY" -m flux.outils verifier || erreur "La verification a trouve une erreur (voir ci-dessus)."
-info "Telechargement du modele de detection (une seule fois)..."
-"$VPY" -I - <<'PYEOF' 2>/dev/null && ok "Modele YOLO26n pret." || alerte "Modele non telecharge : Flux le fera au premier demarrage."
-import sys
-sys.path.insert(0, ".")
-from flux.vision import assurer_modele
-assurer_modele("yolo26n.pt")
-PYEOF
+info "Telechargement des modeles de detection et de visages (une seule fois)..."
+if "$VPY" -m flux.outils modeles; then ok "Modeles prets."
+else alerte "Un modele n'a pas pu etre telecharge (raison ci-dessus) : Flux reessaiera au demarrage."; fi
 
 # ---------------------------------------------------------------------------
 # 8. Icone, lanceur, options

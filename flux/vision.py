@@ -105,20 +105,37 @@ _THREADS_REGLES = []
 
 
 def _limiter_threads_cpu():
-    """Sur processeur, PyTorch prend tous les cœurs et affame le décodage vidéo : on en laisse deux libres."""
+    """Sur processeur, PyTorch prend tous les cœurs et affame le décodage vidéo : on laisse un cœur libre sur les
+    petits processeurs (4 cœurs ou moins), deux au-delà."""
     if _THREADS_REGLES:
         return
     _THREADS_REGLES.append(True)
     try:
         import torch
-        torch.set_num_threads(max(1, (os.cpu_count() or 2) - 2))
+        n = os.cpu_count() or 2
+        torch.set_num_threads(max(1, n - 1 if n <= 4 else n - 2))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _regler_gpu():
+    """Carte NVIDIA : noyaux cuDNN choisis pour la taille d'image (plus rapides après la première analyse)."""
+    if "gpu" in _THREADS_REGLES:
+        return
+    _THREADS_REGLES.append("gpu")
+    try:
+        import torch
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     except Exception:  # noqa: BLE001
         pass
 
 
 def appareil(choix):
     info = info_appareil()
-    if choix != "cpu" and info["cuda"]:
+    if choix not in ("cpu", "intel_gpu") and info["cuda"]:
+        _regler_gpu()
         return "cuda:0"
     if choix == "auto" and info.get("mps"):
         return "mps"
@@ -211,11 +228,119 @@ def assurer_modele(nom, rappel=None):
                     if e.code == 404:
                         break  # pas dans cette version des modèles : essayer la suivante
                 except Exception as e:  # noqa: BLE001
-                    erreurs.append(str(e))
+                    erreurs.append(expliquer_erreur_reseau(e))
                 time.sleep(1.5 * (essai + 1))
         raise RuntimeError(f"téléchargement de {base} impossible ({erreurs[-1] if erreurs else 'erreur inconnue'}). "
                            f"Vérifiez la connexion, ou téléchargez le fichier depuis github.com/ultralytics/assets/"
                            f"releases et placez-le dans le dossier « modeles ».")
+
+
+# ---------------------------------------------------------------------------
+# Moteurs d'analyse : PyTorch, OpenVINO (processeurs Intel et AMD, puces graphiques Intel), ONNX Runtime
+# ---------------------------------------------------------------------------
+NOMS_MOTEURS = {"pytorch": "PyTorch", "openvino": "OpenVINO", "onnx": "ONNX Runtime"}
+_VERROU_EXPORT = threading.Lock()
+
+
+def module_present(nom):
+    import importlib.util
+    try:
+        return importlib.util.find_spec(nom) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def moteur_effectif(cfg, appareil_):
+    """Choix du moteur. Automatique : PyTorch sur carte graphique, OpenVINO sur processeur (1,5 à 3 fois plus rapide
+    que PyTorch sur un processeur Intel ou AMD), PyTorch si OpenVINO n'est pas installé."""
+    choix = cfg.get("detection.moteur")
+    if choix == "openvino":
+        return "openvino" if module_present("openvino") else "pytorch"
+    if choix == "onnx":
+        return "onnx" if module_present("onnxruntime") else "pytorch"
+    if choix == "pytorch" or str(appareil_).startswith(("cuda", "mps")):
+        return "pytorch"
+    import platform
+    if module_present("openvino") and platform.machine().lower() in ("amd64", "x86_64", "aarch64", "arm64"):
+        return "openvino"
+    return "pytorch"
+
+
+def chemin_optimise(chemin, moteur, taille):
+    base = os.path.splitext(chemin)[0]
+    return f"{base}_{taille}_openvino_model" if moteur == "openvino" else f"{base}_{taille}.onnx"
+
+
+def optimise_valide(cible, moteur):
+    if moteur == "openvino":
+        return os.path.isdir(cible) and any(f.endswith(".xml") for f in os.listdir(cible)) and any(
+            f.endswith(".bin") for f in os.listdir(cible))
+    return os.path.isfile(cible) and os.path.getsize(cible) > 100_000
+
+
+def exporter_modele(chemin, moteur, taille, emettre=None):
+    """Convertit une fois pour toutes un modèle .pt pour OpenVINO ou ONNX (rangé à côté, dans « modeles »)."""
+    import shutil
+    cible = chemin_optimise(chemin, moteur, taille)
+    with _VERROU_EXPORT:
+        if optimise_valide(cible, moteur):
+            return cible
+        if emettre:
+            emettre(f"Optimisation de {os.path.basename(chemin)} pour ce processeur ({NOMS_MOTEURS[moteur]}) : "
+                    f"une seule fois, environ une minute…", "info")
+        from ultralytics import RTDETR, YOLO
+        sans_statistiques()
+        classe = RTDETR if os.path.basename(chemin).lower().startswith("rtdetr") else YOLO
+        options = dict(format=moteur, imgsz=int(taille), dynamic=False, batch=1, device="cpu", verbose=False)
+        if moteur == "onnx":
+            options["simplify"] = False  # évite une dépendance supplémentaire (onnxslim)
+        sortie = classe(chemin).export(**options)
+        sortie = str(sortie).rstrip("/\\")
+        if not os.path.exists(sortie):
+            raise RuntimeError("conversion sans résultat")
+        if os.path.abspath(sortie) != os.path.abspath(cible):
+            if os.path.isdir(cible):
+                shutil.rmtree(cible, ignore_errors=True)
+            elif os.path.exists(cible):
+                os.remove(cible)
+            shutil.move(sortie, cible)
+        if not optimise_valide(cible, moteur):
+            raise RuntimeError("modèle converti incomplet")
+        return cible
+
+
+def obtenir_detecteur_optimise(nom, rappel=None, moteur="pytorch", taille=640, emettre=None):
+    """Comme obtenir_detecteur, avec le moteur demandé. Retourne (modèle, verrou, moteur réellement utilisé).
+    En cas d'échec de la conversion, repli silencieux (message dans le journal) sur PyTorch."""
+    chemin = assurer_modele(nom, rappel)
+    if moteur != "pytorch" and chemin.lower().endswith(".pt"):
+        try:
+            cible = exporter_modele(chemin, moteur, taille, emettre)
+        except Exception as e:  # noqa: BLE001
+            if emettre:
+                emettre(f"Optimisation {NOMS_MOTEURS.get(moteur, moteur)} impossible ({str(e)[:160]}) : "
+                        f"analyse avec PyTorch.", "erreur")
+            moteur = "pytorch"
+        else:
+            with _LOCK:
+                if cible not in _MODELES:
+                    from ultralytics import RTDETR, YOLO
+                    sans_statistiques()
+                    classe = RTDETR if os.path.basename(chemin).lower().startswith("rtdetr") else YOLO
+                    _MODELES[cible] = (classe(cible, task="detect"), threading.Lock())
+                return (*_MODELES[cible], moteur)
+    modele, verrou = obtenir_detecteur(nom, rappel)
+    return modele, verrou, "pytorch"
+
+
+def zones_options(o):
+    """Zones d'une source : liste {"nom", "rect": (x1, y1, x2, y2)} (coordonnées 0-1). Lit l'ancien format « zone »."""
+    zs = o.get("zones")
+    if zs:
+        return [{"nom": str(z.get("nom") or f"Zone {i + 1}"), "rect": tuple(z["rect"])}
+                for i, z in enumerate(zs) if isinstance(z, dict) and z.get("rect")]
+    z = o.get("zone")
+    return [{"nom": "Zone 1", "rect": tuple(z)}] if z else []
 
 
 def obtenir_detecteur(nom, rappel=None):
@@ -230,13 +355,48 @@ def obtenir_detecteur(nom, rappel=None):
         return _MODELES[chemin]
 
 
+def _ouvrir_url(req, delai=60):
+    """urlopen, avec repli sur les certificats de « certifi » quand ceux de Windows sont périmés
+    (erreur « CERTIFICATE_VERIFY_FAILED » sur les PC peu mis à jour ou derrière un antivirus qui filtre HTTPS)."""
+    import ssl
+    try:
+        return urllib.request.urlopen(req, timeout=delai)
+    except urllib.error.URLError as e:
+        if not isinstance(getattr(e, "reason", None), ssl.SSLError):
+            raise
+        try:
+            import certifi
+        except ImportError:
+            raise e from None
+        return urllib.request.urlopen(req, timeout=delai, context=ssl.create_default_context(cafile=certifi.where()))
+
+
+def expliquer_erreur_reseau(e):
+    """Message compréhensible pour une erreur de téléchargement."""
+    import ssl
+    raison = getattr(e, "reason", e)
+    texte = str(raison)
+    if isinstance(raison, ssl.SSLError) or "CERTIFICATE" in texte.upper():
+        return ("certificat de sécurité refusé : mettez Windows à jour (Windows Update), ou désactivez l'analyse HTTPS "
+                "de l'antivirus le temps du téléchargement")
+    if isinstance(e, urllib.error.HTTPError):
+        return f"le serveur a répondu {e.code}"
+    if isinstance(raison, (TimeoutError,)) or "timed out" in texte:
+        return "délai dépassé : connexion trop lente ou bloquée par un pare-feu"
+    if "getaddrinfo" in texte or "Name or service" in texte or "11001" in texte:
+        return "pas d'accès à Internet (adresse introuvable) : vérifiez la connexion ou le proxy"
+    if "10013" in texte or "10060" in texte or "10061" in texte or "refused" in texte.lower():
+        return "connexion bloquée (pare-feu, antivirus ou proxy d'entreprise)"
+    return texte
+
+
 def telecharger(url, destination, rappel=None):
     """Téléchargement simple avec fichier temporaire (jamais de modèle à moitié écrit)."""
     os.makedirs(os.path.dirname(destination), exist_ok=True)
     tmp = destination + ".part"
     req = urllib.request.Request(url, headers={"User-Agent": "Flux"})  # jamais de reprise partielle (Range)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+        with _ouvrir_url(req) as r, open(tmp, "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)
             lu = 0
             while True:
@@ -436,6 +596,7 @@ class Piste:
         self.personne = None  # (id, nom, categorie) une fois identifiée
         self.expr_votes = {}
         self.dans_zone = None
+        self.dans_zones = {}  # nom de zone -> dedans (multi-zones)
         self.immobile_depuis = t
         self.stationnement_signale = False
         self.alerte_envoyee = False
@@ -529,6 +690,8 @@ class Pipeline:
         self.temps_analyse = 0.0
         self.erreur_modele = None
         self.amelioration_fine = False
+        self.moteur = "pytorch"
+        self._zs = []
 
     # --- ressources -------------------------------------------------------------
     def _ressource(self, cle, fabrique, libelle):
@@ -567,34 +730,74 @@ class Pipeline:
                 self.emettre(f"Téléchargement de {os.path.basename(fichier)} : {palier * 25} %", "info")
 
         try:
-            self.modele, self.verrou = obtenir_detecteur(fichier, progression)
+            self.modele, self.verrou, self.moteur = obtenir_detecteur_optimise(
+                fichier, progression, moteur_effectif(self.cfg, self.appareil), self.taille, self.emettre)
         except Exception as e:  # noqa: BLE001
-            self.erreur_modele = str(e)
-            self.emettre(f"Impossible de charger le modèle {fichier} : {e}", "erreur")
+            texte = str(e)
+            if os.name == "nt" and ("c10.dll" in texte or "WinError 126" in texte or "DLL load failed" in texte):
+                texte = ("PyTorch ne démarre pas car Microsoft Visual C++ manque sur ce PC. Relancez installer.bat "
+                         "(il l'installe) ou installez https://aka.ms/vs/17/release/vc_redist.x64.exe, puis redémarrez")
+            self.erreur_modele = texte
+            self.emettre(f"Impossible de charger le modèle {fichier} : {texte}", "erreur")
             return False
-        self.emettre(f"Niveau {self.libelle_niveau} prêt ({time.time() - t0:.0f} s) · calcul sur "
-                     f"{'carte graphique' if self.appareil.startswith('cuda') else self.appareil.upper()}", "info")
+        calcul = "carte graphique" if self.appareil.startswith("cuda") else (
+            "puce graphique Intel" if self._appareil_inference() == "intel:gpu" else "processeur")
+        self.emettre(f"Niveau {self.libelle_niveau} prêt ({time.time() - t0:.0f} s) · calcul sur {calcul} "
+                     f"({NOMS_MOTEURS.get(self.moteur, self.moteur)})", "info")
         return True
 
     # --- outils -----------------------------------------------------------------------
-    def _dans_zone(self, box, w, h):
-        zone = self.o.get("zone")
-        if not zone:
-            return True
-        x1, y1, x2, y2 = zone
+    @staticmethod
+    def _dans_rect(box, w, h, rect):
+        x1, y1, x2, y2 = rect
         cx, cy = (box[0] + box[2]) / 2 / w, (box[1] + box[3]) / 2 / h
         return x1 <= cx <= x2 and y1 <= cy <= y2
 
+    def _dans_zone(self, box, w, h):
+        """Vrai si le centre du cadre est dans au moins une zone (ou s'il n'y a pas de zone)."""
+        if not self._zs:
+            return True
+        return any(self._dans_rect(box, w, h, z["rect"]) for z in self._zs)
+
+    def _region_utile(self, W, H):
+        """Rectangle englobant les zones (+ marge) : l'analyse se fait sur ce recadrage, donc en plus haute
+        résolution pour les personnes de la zone, et plus vite. None = image entière."""
+        if not self._zs or not self.cfg.get("detection.recadrage_zones"):
+            return None
+        x1 = min(z["rect"][0] for z in self._zs)
+        y1 = min(z["rect"][1] for z in self._zs)
+        x2 = max(z["rect"][2] for z in self._zs)
+        y2 = max(z["rect"][3] for z in self._zs)
+        mx, my = 0.08 * (x2 - x1) + 0.02, 0.08 * (y2 - y1) + 0.02
+        x1, y1, x2, y2 = max(0.0, x1 - mx), max(0.0, y1 - my), min(1.0, x2 + mx), min(1.0, y2 + my)
+        if (x2 - x1) * (y2 - y1) > 0.7:
+            return None  # zones presque partout : inutile
+        r = (int(x1 * W), int(y1 * H), int(x2 * W), int(y2 * H))
+        return r if r[2] - r[0] >= 64 and r[3] - r[1] >= 64 else None
+
+    def _appareil_inference(self):
+        if self.moteur == "openvino" and self.cfg.get("detection.appareil") == "intel_gpu":
+            return "intel:gpu"
+        return self.appareil
+
     def _predire(self, images, classes):
-        demi = self.appareil.startswith("cuda") and self.cfg.get("detection.demi_precision")
+        demi = self.moteur == "pytorch" and self.appareil.startswith("cuda") and self.cfg.get("detection.demi_precision")
+        options = dict(conf=self.cfg.get("detection.confiance"), iou=self.cfg.get("detection.iou"), classes=classes,
+                       imgsz=self.taille, device=self._appareil_inference(), verbose=False, **options_precision(demi))
         with self.verrou:
-            return self.modele(images, conf=self.cfg.get("detection.confiance"), iou=self.cfg.get("detection.iou"),
-                               classes=classes, imgsz=self.taille, device=self.appareil, verbose=False,
-                               **options_precision(demi))
+            if self.moteur == "pytorch":
+                return self.modele(images, **options)
+            # modèles convertis : une image à la fois (taille fixe, lot de 1)
+            return [self.modele(im, **options)[0] for im in images]
 
     def _detecter(self, img, classes):
-        """Détection sur l'image entière, plus des tuiles 2×2 au niveau Maximum."""
+        """Détection sur l'image entière (ou sur le recadrage des zones), plus des tuiles 2×2 au niveau Maximum."""
         H, W = img.shape[:2]
+        roi = self._region_utile(W, H)
+        ox, oy = (roi[0], roi[1]) if roi else (0, 0)
+        if roi:
+            img = img[roi[1]:roi[3], roi[0]:roi[2]]
+            H, W = img.shape[:2]
         regions = [(0, 0, W, H)]
         if self.tuiles and W >= 400 and H >= 300:
             tw, th = int(W * 0.6), int(H * 0.6)
@@ -602,6 +805,7 @@ class Pipeline:
         resultats = self._predire([img[y1:y2, x1:x2] for (x1, y1, x2, y2) in regions], classes)
         boites, scores, cls = [], [], []
         for (x1, y1, _, _), r in zip(regions, resultats):
+            x1, y1 = x1 + ox, y1 + oy
             for b, c, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(), r.boxes.cls.tolist()):
                 boites.append([b[0] + x1, b[1] + y1, b[2] + x1, b[3] + y1])
                 scores.append(c)
@@ -613,6 +817,7 @@ class Pipeline:
         t = time.time() if t is None else t
         debut = time.time()
         h, w = frame.shape[:2]
+        self._zs = zones_options(self.o)
         veut_plaques = bool(self.o.get("plaques"))
         classes = [0] + (list(CLASSES_VEHICULES) if veut_plaques else [])
 
@@ -662,7 +867,8 @@ class Pipeline:
         self.temps_analyse = time.time() - debut
         affichee = amelioree if (amelioree is not None and self.cfg.get("basse_lumiere.afficher")) else None
         return {"w": w, "h": h, "personnes": personnes, "vehicules": vehicules, "plaques": plaques,
-                "visages": visages, "pistes": pistes, "zone": self.o.get("zone"), "basse_lumiere": sombre,
+                "visages": visages, "pistes": pistes, "zones": [dict(z) for z in self._zs],
+                "zone": self._zs[0]["rect"] if self._zs else None, "basse_lumiere": sombre,
                 "luminance": lum, "image_affichee": affichee}
 
     # --- visages ------------------------------------------------------------------------
@@ -855,7 +1061,6 @@ class Pipeline:
         delai = self.cfg.get("detection.delai_absence")
         pistes, perdues = self.traqueur.mettre_a_jour(personnes, t, delai)
         h, w = frame.shape[:2]
-        zone = self.o.get("zone")
         confirmation = self.cfg.get("detection.confirmation")
         enregistrer = self.base is not None and self.cfg.get("base.actions")
 
@@ -887,11 +1092,16 @@ class Pipeline:
             if not p.confirmee:
                 continue
             self._resoudre_identite(p, frame, enregistrer, t)
-            if zone:
-                dedans = self._dans_zone(p.box, w, h)
-                if p.dans_zone is not None and dedans != p.dans_zone:
-                    self._action(p, "zone", "Entrée dans la zone" if dedans else "Sortie de la zone", frame, enregistrer)
-                p.dans_zone = dedans
+            for z in self._zs:
+                dedans = self._dans_rect(p.box, w, h, z["rect"])
+                avant = p.dans_zones.get(z["nom"])
+                if avant is not None and dedans != avant:
+                    if len(self._zs) == 1:
+                        texte = "Entrée dans la zone" if dedans else "Sortie de la zone"
+                    else:
+                        texte = f"Entrée dans « {z['nom']} »" if dedans else f"Sortie de « {z['nom']} »"
+                    self._action(p, "zone", texte, frame, enregistrer)
+                p.dans_zones[z["nom"]] = dedans
             if not p.stationnement_signale and t - p.immobile_depuis >= self.cfg.get("base.stationnement"):
                 p.stationnement_signale = True
                 self._action(p, "stationnement", f"Immobile depuis {t - p.immobile_depuis:.0f} s", frame, enregistrer)

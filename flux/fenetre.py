@@ -219,6 +219,13 @@ class APropos(QDialog):
         bm = Bouton("Mises à jour", "discret")
         bm.clicked.connect(lambda: fen.verifier_mises_a_jour(manuel=True))
         h2.addWidget(bm)
+        from .mise_a_jour import depot
+        d = depot(fen.cfg)
+        if d:
+            bg = Bouton("GitHub", "discret", "lien")
+            bg.setToolTip(f"https://github.com/{d}")
+            bg.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://github.com/{d}")))
+            h2.addWidget(bg)
         h2.addStretch(1)
         bf = Bouton("Fermer", "primaire")
         bf.clicked.connect(self.accept)
@@ -583,6 +590,12 @@ class FenetrePrincipale(QMainWindow):
                 QTimer.singleShot(0, self.appliquer_apparence)
         if cle.startswith("detection.") or cle == "systeme.tcp_rtsp":
             self.page_cameras_niveaux()
+        if cle in ("detection.moteur", "detection.appareil"):  # nouveau moteur : relancer les caméras en marche
+            actives = [p for p in self.page_cameras.pages if p.en_cours()]
+            for p in actives:
+                p.demarrer()
+            if actives:
+                self.toast(f"Moteur d'analyse changé : {len(actives)} caméra(s) relancée(s).")
         if cle.startswith(("mail.", "notif.", "telegram.", "whatsapp.", "sms.", "appel.", "ntfy.", "discord.",
                            "webhook.")):
             self._maj_barre_etat()
@@ -740,8 +753,13 @@ class FenetrePrincipale(QMainWindow):
     def _maj_barre_etat(self):
         i = self.info_appareil
         if i:
-            self.st_appareil.setText(f"Calcul : {i['nom']}" + ("" if i.get("cuda") or i.get("mps") else
-                                                             " (pas de carte NVIDIA détectée)"))
+            from .vision import NOMS_MOTEURS, moteur_effectif
+            app = "cuda" if i.get("cuda") and self.cfg.get("detection.appareil") not in ("cpu", "intel_gpu") else "cpu"
+            moteur = NOMS_MOTEURS.get(moteur_effectif(self.cfg, app), "PyTorch")
+            nom = "Puce graphique Intel" if (app == "cpu" and moteur == "OpenVINO"
+                                             and self.cfg.get("detection.appareil") == "intel_gpu") else i["nom"]
+            self.st_appareil.setText(f"Calcul : {nom} · {moteur}" + ("" if i.get("cuda") or i.get("mps") else
+                                                                    " (pas de carte NVIDIA)"))
         _, _, _, lib = niveau_effectif(self.cfg.get("detection.niveau"), self.cfg)
         self.st_niveau.setText(f"Niveau : {lib}")
         actives = sum(1 for p in self.page_cameras.pages if p.en_cours())

@@ -1,4 +1,5 @@
-FLUX 0.3.3 alpha — Surveillance vidéo intelligente
+FLUX 0.7.0 alpha — Surveillance vidéo intelligente
+Dépôt officiel et mises à jour : https://github.com/Daoakashi/Flux
 ==================================================
 
 INSTALLATION (Linux Mint, Ubuntu, Debian)
@@ -29,6 +30,11 @@ MINI-PC SANS CARTE GRAPHIQUE (exemple : Minisforum GK41, Celeron J4125, 4 cœurs
 Flux fonctionne sur processeur, mais ce petit processeur est limité :
   - Au premier lancement, Flux choisit seul des réglages légers : niveau Rapide (YOLO26n), une image
     analysée sur 2, animations coupées, vidéos de passage plus légères.
+  - Le moteur OpenVINO est utilisé automatiquement (converti pendant installer.sh) : environ 1,5 à 3 fois
+    plus rapide que PyTorch sur ce type de processeur. L'analyse se met en veille quand rien ne bouge.
+    Essayez aussi Réglages › Détection › Processeur de calcul › « Puce graphique Intel » (paquet
+    intel-opencl-icd nécessaire : sudo apt install intel-opencl-icd).
+  - Dessinez des zones sur les parties utiles de l'image : l'analyse se concentre dessus.
   - Comptez 2 à 4 caméras en analyse. Gardez le niveau Rapide ; Équilibré ralentit beaucoup, Précis et
     Maximum sont inutilisables sans carte graphique.
   - Pour beaucoup de caméras, utilisez le flux secondaire (basse résolution) de vos caméras IP : c'est
@@ -45,112 +51,29 @@ processeur affiché et demandez une version adaptée.
 MISE À JOUR DEPUIS UNE VERSION PRÉCÉDENTE
   Copiez le contenu de cette archive par-dessus votre dossier Flux actuel (acceptez de remplacer).
   config.json, flux.db, modeles et venv sont conservés. Relancez ensuite « bash installer.sh » une
-  fois. Ensuite, les mises à jour se font depuis Flux (voir MISES À JOUR PAR GITHUB).
-
-Si Flux ne démarre pas, une boîte de dialogue explique l'erreur et le détail est écrit dans
-flux_erreur.log. Relancer installer.sh répare la plupart des problèmes.
-Aucun écran (session SSH, serveur) : Flux a besoin d'une session graphique ; utilisez le bureau.
-
-NIVEAUX DE SCAN
----------------
-  Rapide     YOLO26n  · 640 px                 temps réel partout, même sans carte graphique
-  Équilibré  YOLO26s  · 640 px                 bon compromis pour plusieurs caméras
-  Précis     YOLO26x  · 960 px                 cibles lointaines, basse lumière
-  Maximum    RT-DETR-X · 640 px + découpage 2×2 le plus précis, surtout dans le noir (carte requise)
-  Personnalisé : n'importe quel modèle Ultralytics (yolo11x.pt, rtdetr-l.pt…) ou votre propre
-  fichier .pt / .onnx / .engine (Réglages › Détection).
-Chaque caméra peut avoir son propre niveau.
-
-BASSE LUMIÈRE
--------------
-Activée automatiquement quand l'image est sombre : éclaircissement, débruitage et contraste local,
-puis « double passe » (image d'origine + image améliorée) pour ne jamais faire moins bien.
-Dans le noir quasi total, seul le niveau Maximum reste fiable ; une caméra infrarouge reste la
-meilleure solution.
-
-FONCTIONS
----------
-- Caméras : webcam, RTSP/HTTP, fichiers, liens web (YouTube en direct…), caméras ONVIF
-  (recherche automatique sur le réseau, connexion et choix du profil vidéo).
-- Visages : détection (YuNet), reconnaissance (SFace), expressions (HSEmotion).
-  Les visages inconnus deviennent « Inconnu 1, 2… » ; renommez-les dans la page Personnes,
-  fusionnez les doublons, ajoutez des photos. Catégories : connue, inconnue, surveillée,
-  liste noire.
-- Base de données (flux.db) : chaque personne, ses visages et ses actions (apparition,
-  identification, entrée/sortie de zone, immobilité prolongée, départ avec durée).
-- Plaques : détection des véhicules, localisation et lecture des plaques. Déposez un modèle
-  YOLO spécialisé nommé « plaques.pt » à côté de flux.py pour une détection plus fiable.
-- Lecteur : YouTube, Instagram, TikTok, Vimeo, fichiers… avec le son et l'analyse en direct.
-  Instagram et les vidéos privées : Réglages › Lecteur vidéo › Cookies du navigateur.
-  YouTube exige un moteur JavaScript : Deno (installé par installer.sh),
-  puis gardez yt-dlp à jour : pip install -U "yt-dlp[default]" (YouTube change souvent).
-  Mode « Télécharger puis lire » en meilleure qualité : ffmpeg (installé par installer.sh).
-- Alertes : notification, photo, mail (délai anti-spam), journal par mail.
-- Journal : actions réparties en catégories (Liste noire, Alertes, Personnes surveillées,
-  Identifications, Passages, Zone et stationnement, Véhicules et plaques). Bouton « Catégories… »
-  pour en créer, changer les couleurs, l'ordre et les règles (type d'action, catégorie de la
-  personne, caméra, mots-clés). Clic droit sur une action : « Classer dans… » à la main.
-- Réglages : tous les paramètres, recherche, thème clair ou sombre, couleur, police, taille,
-  arrondis, densité, animations, opacité ; import et export.
-
-GROUPES DE CAMÉRAS (plusieurs vues dans une seule fenêtre)
----------------------------------------------------------
-Page Caméras › Ajouter › « Groupe de caméras (plusieurs vues)… ». Donnez un nom, cochez les caméras
-à réunir (flèches Monter / Descendre pour l'ordre) et choisissez la disposition (automatique : 2 caméras
-côte à côte, 3-4 en carré, puis 3 ou 4 colonnes). Le groupe apparaît comme un onglet « ▦ ».
-  - Double-clic sur une vignette : elle remplit le groupe ; double-clic encore : retour à la grille.
-  - Clic droit : agrandir, ouvrir la page de la caméra, la démarrer ou l'arrêter, la retirer du groupe.
-  - « Plein écran » : le mur seul, idéal pour un écran dédié ; Échap ou F11 pour revenir.
-  - « Tout démarrer / Tout arrêter », « Modifier… » (nom, caméras, colonnes), « Supprimer le groupe »
-    (les caméras ne sont pas arrêtées ni supprimées).
-Vous pouvez créer autant de groupes que vous voulez (Extérieur, Rez-de-chaussée…) ; une caméra peut être
-dans plusieurs groupes. Les vignettes sont réduites : un groupe ne ralentit pas l'analyse.
-
-VIDÉOS DES PASSAGES (Réglages › Vidéos des passages)
----------------------------------------------------
-Flux garde en mémoire les dernières secondes de chaque caméra. À chaque alerte (au choix : chaque
-passage, ou la liste noire seulement), il enregistre une vidéo MP4 : 3 s avant + 7 s après par
-défaut, prolongée si l'activité continue (30 s maximum). Les vidéos sont rangées dans
-detections/videos et supprimées après 30 jours (réglable).
-Envoi : mail (pièce jointe, 20 Mo max), Telegram, ntfy, Discord et webhook. WhatsApp et SMS ne
-peuvent recevoir une vidéo que si elle est publiée sur Internet : Flux ne le fait pas pour protéger
-vos images, ces canaux reçoivent l'alerte en texte. Pour recevoir la vidéo sur le téléphone,
-utilisez Telegram ou ntfy. Bouton « vidéo » à côté de la capture : enregistre à la main (non envoyée).
-Dans le journal, catégorie « Vidéos » : double-clic pour regarder.
-
-LISTE NOIRE
------------
-Personnes : page Personnes › catégorie « Liste noire ». Plaques : Réglages › Plaques › Plaques en
-liste noire (ex. 1-ABC-234, la caméra doit avoir « Lire les plaques »). Une détection en liste
-noire déclenche toujours une alerte prioritaire : mail et notifications envoyés immédiatement,
-sans tenir compte du délai anti-spam, et classée dans la catégorie « Liste noire » du journal.
-
-NOTIFICATIONS SUR LE TÉLÉPHONE (Réglages › Notifications)
---------------------------------------------------------
-Activez « Envoyer des notifications », puis un ou plusieurs canaux. Chaque canal a un bouton
-« Tester ». Rien à installer sur le PC.
-  ntfy (le plus simple, gratuit, sans compte) : installez l'application ntfy sur le téléphone,
-     abonnez-vous à un sujet difficile à deviner (ex. flux-maison-7f3k9q), saisissez-le dans Flux.
-  Telegram (gratuit, avec photo) : sur Telegram, écrivez à @BotFather › /newbot, copiez le jeton
-     dans Flux, envoyez « bonjour » à votre bot, puis « Trouver mon identifiant Telegram ».
-  WhatsApp gratuit (CallMeBot, texte seul, votre propre numéro) : envoyez « I allow callmebot to
-     send me messages » au +34 644 66 32 62 sur WhatsApp ; vous recevez une clé à saisir dans Flux.
-  WhatsApp officiel, SMS et appel téléphonique : compte Twilio (payant). L'appel lit l'alerte à
-     voix haute ; par défaut il est réservé à la liste noire.
-  Discord : webhook d'un salon. Webhook générique (avancé) : JSON pour Home Assistant, n8n…
-Les catégories du journal marquées « Notifier » envoient aussi leurs actions.
-Les jetons et clés sont enregistrés dans config.json : ne partagez pas ce fichier (l'export des
-réglages, lui, les retire).
+  fois. Ensuite, les mises à jour se font depuis Flux (voir PERFORMANCES (Réglages › Détection)
+-----------------------------------
+  - Moteur d'analyse « Automatique » : PyTorch sur carte NVIDIA (demi-précision), OpenVINO sur
+    processeur Intel ou AMD (1,5 à 3 fois plus rapide). La conversion du modèle se fait une seule fois
+    (pendant l'installation ou au premier démarrage d'une caméra), puis elle est gardée dans « modeles ».
+  - « Puce graphique Intel » (Processeur de calcul) : utilise la puce graphique intégrée des PC Intel
+    avec OpenVINO. Essayez-la sur un mini-PC ; revenez à « Automatique » si c'est plus lent.
+  - « Analyser seulement quand ça bouge » : sans personne à l'image et sans mouvement, l'analyse se met en
+    veille (vérification toutes les 2 s) et reprend au premier mouvement. Le sous-titre de la caméra
+    affiche « analyse en veille ».
+  - Avec des zones, l'analyse porte seulement sur le rectangle qui les entoure (plus rapide, plus précis).
+  - Le moteur utilisé est indiqué dans la barre d'état et sous le nom de chaque caméra.
 
 MISES À JOUR PAR GITHUB
 -----------------------
-Réglages › Mises à jour : indiquez le dépôt (propriétaire/dépôt). Flux vérifie au démarrage et
-propose l'installation : le code actuel est d'abord sauvegardé dans « sauvegardes », puis seul le
-code est remplacé (réglages, base, modèles et venv conservés). Si requirements.txt change, Flux
-demande de relancer installer.sh.
+Le dépôt officiel est déjà réglé : https://github.com/Daoakashi/Flux (Réglages › Mises à jour, champ
+vide = ce dépôt). Flux vérifie au démarrage et propose l'installation : le code actuel est d'abord
+sauvegardé dans « sauvegardes », puis seul le code est remplacé (réglages, base, modèles et venv
+conservés). Si requirements.txt change, Flux demande de relancer installer.sh.
 Pour publier une version : mode développeur › augmentez la version (version.json) ›
-« Préparer une publication » › sur GitHub, Releases › Draft a new release, tag v0.3.1 (cochez
-« Set as a pre-release » pour alpha et beta), joignez le zip du dossier « publication ».
+« Préparer une publication » › sur GitHub, Releases › Draft a new release, tag v0.7.0-alpha (cochez
+« Set as a pre-release » pour alpha et beta). Inutile de joindre un zip : Flux télécharge le code de
+la release. Le tag doit correspondre à version.json (0.7.0 + alpha = v0.7.0-alpha).
 Sans release, Flux compare aussi le version.json de la branche principale.
 
 MODE DÉVELOPPEUR

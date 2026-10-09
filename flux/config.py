@@ -41,10 +41,8 @@ def ecrire_version(donnees, chemin=FICHIER_VERSION):
 
 
 def libelle_version(version, canal=""):
-    """« 0.3.0 » + « alpha » -> « 0.3 alpha »."""
+    """« 0.7.0 » + « alpha » -> « 0.7.0 alpha » (le numéro est affiché tel qu'il est écrit dans version.json)."""
     v = str(version).strip()
-    if v.count(".") == 2 and v.endswith(".0"):
-        v = v[:-2]
     return f"{v} {canal}".strip() if canal and canal != "stable" else v
 
 
@@ -140,8 +138,22 @@ SCHEMA = [
     R("detection.taille_personnalisee", "detection", "Taille d'analyse (personnalisé)", "choix", "640", "",
       [("320", "320 px"), ("480", "480 px"), ("640", "640 px"), ("960", "960 px"), ("1280", "1280 px")]),
     R("detection.appareil", "detection", "Processeur de calcul", "choix", "auto",
-      "Auto utilise la carte graphique NVIDIA si elle est disponible.",
-      [("auto", "Automatique"), ("cuda", "Carte NVIDIA (CUDA)"), ("cpu", "Processeur (CPU)")]),
+      "Auto utilise la carte graphique NVIDIA si elle est disponible. « Puce graphique Intel » demande le moteur "
+      "OpenVINO (utile sur les mini-PC Intel sans carte graphique).",
+      [("auto", "Automatique"), ("cuda", "Carte NVIDIA (CUDA)"), ("cpu", "Processeur (CPU)"),
+       ("intel_gpu", "Puce graphique Intel (OpenVINO)")]),
+    R("detection.moteur", "detection", "Moteur d'analyse", "choix", "auto",
+      "Automatique : PyTorch sur carte NVIDIA, OpenVINO sur processeur (1,5 à 3 fois plus rapide sur Intel et AMD). "
+      "Le modèle est converti une seule fois (environ une minute) puis gardé dans « modeles ».",
+      [("auto", "Automatique (le plus rapide)"), ("pytorch", "PyTorch"), ("openvino", "OpenVINO"),
+       ("onnx", "ONNX Runtime")]),
+    R("detection.mouvement", "detection", "Analyser seulement quand ça bouge", "choix", "auto",
+      "Quand l'image est vide et immobile, l'analyse se met en veille (vérification toutes les 2 s) et reprend dès "
+      "qu'un mouvement apparaît. Libère le processeur pour les autres caméras. Automatique : actif sans carte NVIDIA.",
+      [("auto", "Automatique"), ("toujours", "Toujours"), ("jamais", "Jamais")]),
+    R("detection.recadrage_zones", "detection", "Analyser seulement autour des zones", "bool", True,
+      "Avec des zones dessinées, l'analyse porte sur le rectangle qui les entoure : les personnes y sont vues en plus "
+      "grand (meilleure détection de loin) et l'analyse est plus rapide.", avance=True),
     R("detection.demi_precision", "detection", "Demi-précision (FP16)", "bool", True,
       "Sur carte NVIDIA : presque deux fois plus rapide, précision quasi identique.", avance=True),
     R("detection.confiance", "detection", "Confiance minimale", "float", 0.45, "", None, 0.10, 0.95, 0.05),
@@ -342,7 +354,7 @@ SCHEMA = [
       "« Stables » ignore les versions alpha et beta.",
       [("toutes", "Toutes (alpha, beta, stables)"), ("beta", "Beta et stables"), ("stables", "Stables uniquement")]),
     R("maj.depot", "maj", "Dépôt GitHub", "texte", "",
-      "propriétaire/dépôt, ex. ilo-duran/flux. Vide = celui indiqué dans version.json."),
+      "Vide = dépôt officiel de Flux (github.com/Daoakashi/Flux, indiqué dans version.json). Format propriétaire/dépôt."),
     R("maj.jeton", "maj", "Jeton GitHub", "mdp", "", "Seulement pour un dépôt privé (droit « contents: read »).",
       avance=True),
     R("maj.ignoree", "maj", "Version ignorée", "texte", "", "Vide = aucune.", avance=True),

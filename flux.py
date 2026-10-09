@@ -18,7 +18,11 @@ def erreur_fatale():
             f.write(texte)
     except OSError:
         pass
-    message = (f"Flux n'a pas pu démarrer.\n\n{texte.strip().splitlines()[-1]}\n\n"
+    conseil = ""
+    if os.name == "nt" and ("c10.dll" in texte or "WinError 126" in texte or "DLL load failed" in texte):
+        conseil = ("Il manque Microsoft Visual C++ (nécessaire à PyTorch). Relancez installer.bat, qui l'installe, "
+                   "ou installez https://aka.ms/vs/17/release/vc_redist.x64.exe puis redémarrez le PC.\n\n")
+    message = (f"Flux n'a pas pu démarrer.\n\n{texte.strip().splitlines()[-1]}\n\n{conseil}"
                f"Détails dans flux_erreur.log. Relancer "
                f"{'installer.bat' if os.name == 'nt' else 'installer.sh'} répare la plupart des problèmes.")
     if os.name == "nt":

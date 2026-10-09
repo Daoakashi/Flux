@@ -2,7 +2,26 @@
 
 Un groupe ne démarre rien de lui-même : il affiche les caméras déjà ajoutées. Il se contente de les regarder,
 donc ajouter un groupe ne coûte presque rien en calcul (les vignettes sont réduites et rafraîchies plus doucement).
+
+Une vignette peut aussi montrer une seule zone d'une caméra (« Entrée › Porte »), recadrée et agrandie : plusieurs
+zones précises d'une même caméra forment un groupe sans créer de flux supplémentaire (un seul décodage, une seule
+analyse).
 """
+
+SEP = " › "
+
+
+def entree(camera, zone=None):
+    return f"{camera}{SEP}{zone}" if zone else camera
+
+
+def analyser_entree(texte, page_cameras):
+    """« Caméra » ou « Caméra › Zone » -> (page de la caméra ou None, nom de zone ou None, nom de caméra)."""
+    page = page_cameras.page_par_nom(texte)
+    if page is not None or SEP not in texte:
+        return page, None, texte
+    camera, zone = texte.rsplit(SEP, 1)
+    return page_cameras.page_par_nom(camera), zone, camera
 
 import math
 
@@ -83,11 +102,11 @@ class MurVideo(QWidget):
         self._disposer()
 
     def _menu(self, nom, pos):
-        page = self.pc.page_par_nom(nom)
+        page, _zone, camera = analyser_entree(nom, self.pc)
         m = QMenu(self)
         m.addAction("Réduire" if self.agrandi == nom else "Agrandir dans le groupe", lambda: self.basculer_zoom(nom))
         if page is not None:
-            m.addAction("Ouvrir la page de cette caméra", lambda: self.ouvrir.emit(nom))
+            m.addAction("Ouvrir la page de cette caméra", lambda: self.ouvrir.emit(camera))
             m.addAction("Arrêter cette caméra" if page.en_cours() else "Démarrer cette caméra",
                         page._basculer_marche)
         m.addSeparator()
@@ -98,7 +117,7 @@ class MurVideo(QWidget):
         """Met à jour les vignettes affichées. Renvoie {nom: état} des caméras du groupe."""
         etats = {}
         for nom, v in self.vues.items():
-            page = self.pc.page_par_nom(nom)
+            page, zone, _camera = analyser_entree(nom, self.pc)
             if page is None:
                 if v._image is not None:
                     v.effacer()
@@ -106,7 +125,7 @@ class MurVideo(QWidget):
                 v.regler_etat("arret", "", [], 0.0, [nom])
                 etats[nom] = "arret"
             elif v.isVisible():
-                etats[nom] = page.alimenter_vue(v)
+                etats[nom] = page.alimenter_vue(v, zone=zone, titre=nom)
         return etats
 
 
@@ -195,7 +214,7 @@ class PageGroupe(QWidget):
         self.page.sauver()
 
     def modifier(self):
-        d = DialogueGroupe(self, self.page.noms_cameras(), self.nom, self.cameras, self.colonnes)
+        d = DialogueGroupe(self, self.page.entrees_disponibles(), self.nom, self.cameras, self.colonnes)
         if d.exec() == QDialog.DialogCode.Accepted and d.resultat:
             self.appliquer(*d.resultat)
 
@@ -204,11 +223,37 @@ class PageGroupe(QWidget):
             self.appliquer(self.nom, [c for c in self.cameras if c != nom], self.colonnes)
 
     def camera_supprimee(self, nom):
-        if nom in self.cameras:
-            self.appliquer(self.nom, [c for c in self.cameras if c != nom], self.colonnes)
+        reste = [c for c in self.cameras if c != nom and not c.startswith(nom + SEP)]
+        if reste != self.cameras:
+            self.appliquer(self.nom, reste, self.colonnes)
+
+    def camera_renommee(self, ancien, nouveau):
+        def renommer(c):
+            if c == ancien:
+                return nouveau
+            if c.startswith(ancien + SEP):
+                return nouveau + c[len(ancien):]
+            return c
+        nouvelles = [renommer(c) for c in self.cameras]
+        if nouvelles != self.cameras:
+            self.appliquer(self.nom, nouvelles, self.colonnes)
+
+    def zone_renommee(self, camera, ancien, nouveau):
+        nouvelles = [entree(camera, nouveau) if c == entree(camera, ancien) else c for c in self.cameras]
+        if nouvelles != self.cameras:
+            self.appliquer(self.nom, nouvelles, self.colonnes)
+
+    def zone_supprimee(self, camera, zone):
+        if entree(camera, zone) in self.cameras:
+            self.appliquer(self.nom, [c for c in self.cameras if c != entree(camera, zone)], self.colonnes)
 
     def _pages(self):
-        return [p for p in (self.page.page_par_nom(n) for n in self.cameras) if p is not None]
+        pages = []
+        for n in self.cameras:
+            p = analyser_entree(n, self.page)[0]
+            if p is not None and p not in pages:
+                pages.append(p)
+        return pages
 
     def _tout_demarrer(self):
         for p in self._pages():
@@ -249,14 +294,18 @@ class PageGroupe(QWidget):
         if self.plein_ecran is not None:
             etats = self.plein_ecran.mur.rafraichir() or etats
         if not etats:  # ni onglet visible ni plein écran : on lit juste l'état des caméras
-            etats = {n: self.page.etat_camera(n) for n in self.cameras}
+            etats = {n: self.page.etat_camera(analyser_entree(n, self.page)[2]) for n in self.cameras}
         valeurs = list(etats.values())
         etat = ("alerte" if "alerte" in valeurs else "direct" if "direct" in valeurs
                 else "chargement" if "chargement" in valeurs else "arret")
         self.voyant.regler(etat)
         self.voyant_onglet.regler(etat)
         actives = sum(1 for e in valeurs if e in ("direct", "alerte", "chargement"))
-        texte = f"{len(self.cameras)} caméra{'s' if len(self.cameras) > 1 else ''} · {actives} en marche"
+        n_zones = sum(1 for c in self.cameras if analyser_entree(c, self.page)[1])
+        n_cam = len(self.cameras) - n_zones
+        morceaux = ([f"{n_cam} caméra{'s' if n_cam > 1 else ''}"] if n_cam else []) + (
+            [f"{n_zones} zone{'s' if n_zones > 1 else ''}"] if n_zones else [])
+        texte = " + ".join(morceaux or ["vide"]) + f" · {actives} vue{'s' if actives > 1 else ''} en marche"
         if texte != self.sous_titre.text():
             self.sous_titre.setText(texte)
         titre = self.nom + "  ▦"
@@ -280,8 +329,10 @@ class DialogueGroupe(QDialog):
         t = QLabel("Groupe de caméras")
         t.setObjectName("grand")
         v.addWidget(t)
-        v.addWidget(etiquette("Un groupe affiche plusieurs caméras dans une seule fenêtre. Cochez celles à afficher ; "
-                              "l'ordre de la liste est celui de l'écran."))
+        v.addWidget(etiquette("Un groupe affiche plusieurs vues dans une seule fenêtre. Cochez des caméras entières ou "
+                              "des zones précises (« Caméra › Zone ») : une zone s'affiche seule, agrandie, sans créer "
+                              "de flux en plus. Dessinez les zones sur l'image d'une caméra. L'ordre de la liste est "
+                              "celui de l'écran."))
         v.addSpacing(4)
         v.addWidget(QLabel("Nom du groupe"))
         self.nom = QLineEdit(nom)
@@ -295,7 +346,8 @@ class DialogueGroupe(QDialog):
         for n in list(selection) + [n for n in noms_disponibles if n not in selection]:
             if n not in noms_disponibles:
                 continue
-            it = QListWidgetItem(n)
+            it = QListWidgetItem(("      ▸ " + n.split(SEP, 1)[1] + "   (" + n.split(SEP, 1)[0] + ")") if SEP in n else n)
+            it.setData(Qt.ItemDataRole.UserRole, n)
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Checked if n in selection else Qt.CheckState.Unchecked)
             self.liste.addItem(it)
@@ -340,10 +392,10 @@ class DialogueGroupe(QDialog):
         self.liste.setCurrentRow(j)
 
     def _ok(self):
-        choisies = [self.liste.item(i).text() for i in range(self.liste.count())
+        choisies = [self.liste.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.liste.count())
                     if self.liste.item(i).checkState() == Qt.CheckState.Checked]
         if not choisies:
-            self.erreur.setText("Cochez au moins une caméra.")
+            self.erreur.setText("Cochez au moins une caméra ou une zone.")
             return
         self.resultat = (self.nom.text().strip() or "Groupe", choisies, self.colonnes.currentData())
         self.accept()

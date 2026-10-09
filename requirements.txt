@@ -10,6 +10,9 @@ pillow>=10.0
 # Interface et lecteur vidéo (PySide6 complet : le lecteur a besoin de Qt Multimedia)
 PySide6>=6.7
 
+# Analyse accélérée sur processeur (Intel, AMD) et puces graphiques Intel : converti automatiquement
+openvino>=2024.6 ; platform_machine == "x86_64" or platform_machine == "AMD64" or platform_machine == "aarch64" or platform_machine == "arm64"
+
 # Visages, expressions, plaques
 onnxruntime>=1.18
 onnx>=1.16

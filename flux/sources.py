@@ -70,7 +70,7 @@ def conseil_youtube(msg):
     m = msg.lower()
     if any(x in m for x in ("format is not available", "javascript runtime", "js runtime", "sign in to confirm",
                             "challenge", "n challenge", "only images are available")):
-        manque = [] if shutil.which("deno") else ["Deno (winget install DenoLand.Deno, puis redémarrer Flux)"]
+        manque = [] if shutil.which("deno") else ["Deno (relancez " + ("installer.bat" if os.name == "nt" else "installer.sh") + ")"]
         manque.append('yt-dlp à jour avec ses composants : pip install -U "yt-dlp[default]"')
         return " — YouTube a besoin de : " + " ; ".join(manque) + "."
     return ""
@@ -183,9 +183,13 @@ COULEURS_PHOTO = {"personne": (255, 170, 47), "visage": (250, 139, 167), "vehicu
 
 def dessiner(img, ann):
     h, w = img.shape[:2]
-    if ann.get("zone"):
-        x1, y1, x2, y2 = ann["zone"]
+    zones = ann.get("zones") or ([{"nom": "", "rect": ann["zone"]}] if ann.get("zone") else [])
+    for z in zones:
+        x1, y1, x2, y2 = z["rect"]
         cv2.rectangle(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)), COULEURS_PHOTO["zone"], 2)
+        if z.get("nom") and len(zones) > 1:
+            cv2.putText(img, sans_accents(z["nom"]), (int(x1 * w) + 4, int(y1 * h) + 18), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55, COULEURS_PHOTO["zone"], 2)
 
     def cadre(box, c, texte):
         x1, y1, x2, y2 = (int(v) for v in box[:4])
@@ -357,6 +361,10 @@ class Detecteur(threading.Thread):
         self.fps_analyse = 0.0
         self._image_amelioree = False  # l'analyse fournit l'image éclaircie à afficher (basse lumière)
         self._t_directe = 0.0
+        self.resolution = None  # (largeur, hauteur) du flux, affichée dans l'interface
+        self.veille = False     # analyse en pause : image vide et immobile
+        self._ref_mouvement = None
+        self._t_analyse = 0.0
         self.pipeline = Pipeline(nom, cfg, options, self._recevoir, base)
         from .clips import EnregistreurClips
         self.clips = EnregistreurClips(nom, cfg, self._clip_fini)
@@ -394,6 +402,7 @@ class Detecteur(threading.Thread):
         with self.lock:
             self.derniere_image = image
             self.heure_image = heure
+            self.resolution = (image.shape[1], image.shape[0])
             if self._t_directe:
                 fps = 1.0 / max(heure - self._t_directe, 1e-6)
                 self.fps = 0.9 * self.fps + 0.1 * fps if self.fps else fps
@@ -514,6 +523,37 @@ class Detecteur(threading.Thread):
                 self.writer.release()
                 self.writer = None
 
+    # --- économie de calcul : analyse en veille quand rien ne bouge ------------------------------
+    def _mouvement_actif(self):
+        choix = self.cfg.get("detection.mouvement")
+        return choix == "toujours" or (choix == "auto" and not self.pipeline.appareil.startswith("cuda"))
+
+    def _petite_image(self, frame):
+        h, w = frame.shape[:2]
+        from .vision import zones_options
+        zs = zones_options(self.o)
+        if zs:  # seul le mouvement dans les zones compte
+            x1 = min(z["rect"][0] for z in zs); y1 = min(z["rect"][1] for z in zs)  # noqa: E702
+            x2 = max(z["rect"][2] for z in zs); y2 = max(z["rect"][3] for z in zs)  # noqa: E702
+            frame = frame[int(y1 * h):max(int(y2 * h), int(y1 * h) + 2), int(x1 * w):max(int(x2 * w), int(x1 * w) + 2)]
+        petite = cv2.resize(frame, (96, 72), interpolation=cv2.INTER_AREA)
+        return cv2.GaussianBlur(cv2.cvtColor(petite, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+
+    def _analyse_utile(self, frame, ann):
+        """Faut-il analyser cette image ? Non si la scène est vide, immobile, et analysée il y a moins de 2 s."""
+        if ann is None or not self._mouvement_actif():
+            return True
+        if ann.get("personnes") or ann.get("vehicules") or ann.get("pistes"):
+            return True  # quelqu'un est là : suivi normal
+        if time.time() - self._t_analyse >= 2.0:
+            return True
+        petite = self._petite_image(frame)
+        ref = self._ref_mouvement
+        if ref is None or ref.shape != petite.shape:
+            return True
+        change = float((cv2.absdiff(petite, ref) > 18).mean())
+        return change > 0.004  # plus de 0,4 % de l'image a changé
+
     def _boucle(self):
         self.statut = "Chargement du modèle…"
         self._publier("Chargement de l'analyse (la première fois, les modèles se téléchargent)…")
@@ -573,9 +613,18 @@ class Detecteur(threading.Thread):
                 self._publier("Flux rétabli", "ok")
             self.statut = "En cours"
             n += 1
-            if n % max(1, int(self.cfg.get("detection.une_image_sur"))) == 0 or n == 1 or ann is None:
+            self.resolution = (frame.shape[1], frame.shape[0])
+            analyser = n % max(1, int(self.cfg.get("detection.une_image_sur"))) == 0 or n == 1 or ann is None
+            if analyser and not self._analyse_utile(frame, ann):
+                analyser = False
+                self.veille = True
+            if analyser:
                 ann = self.pipeline.analyser(frame)
                 self._vider_attente(frame, ann)
+                self._t_analyse = time.time()
+                self.veille = False
+                if self._mouvement_actif():
+                    self._ref_mouvement = self._petite_image(frame)
             elif ann is not None:
                 ann = dict(ann, image_affichee=None)
 

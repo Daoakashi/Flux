@@ -2,10 +2,12 @@
 
 import os
 from datetime import datetime
+from urllib.parse import unquote, urlparse
 
 import cv2
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+                               QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QScrollArea, QStackedWidget, QTabBar, QVBoxLayout,
                                QWidget)
 
@@ -34,6 +36,31 @@ def texte_niveau(cle, cfg):
     return f"{prefixe}{n['nom']} — {n['texte']}"
 
 
+def decouper_zone(img, ann, rect):
+    """Recadre l'image sur une zone (coordonnées 0-1) et ramène les détections dans ce repère."""
+    h, w = img.shape[:2]
+    x0, y0 = int(rect[0] * w), int(rect[1] * h)
+    x1, y1 = max(int(rect[2] * w), x0 + 2), max(int(rect[3] * h), y0 + 2)
+    crop = img[y0:y1, x0:x1]
+    if not ann:
+        return crop, ann
+    cw, ch = x1 - x0, y1 - y0
+
+    def dedans(b):
+        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        return x0 <= cx <= x1 and y0 <= cy <= y1
+
+    def decaler(b):
+        return [b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0]
+
+    sortie = {"w": cw, "h": ch}
+    for cle in ("personnes", "vehicules", "plaques"):
+        sortie[cle] = [tuple(decaler(b)) + tuple(b[4:]) for b in ann.get(cle, []) if dedans(b)]
+    sortie["visages"] = [dict(v, box=decaler(v["box"])) for v in ann.get("visages", []) if dedans(v["box"])]
+    sortie["pistes"] = [dict(p, box=decaler(p["box"])) for p in ann.get("pistes", []) if dedans(p["box"])]
+    return crop, sortie
+
+
 class PageFlux(QWidget):
     """Une caméra : vidéo, détections, réglages propres."""
 
@@ -48,12 +75,16 @@ class PageFlux(QWidget):
         self._img_ref = None
         self._titre = None
         self.voyant_onglet = Voyant(10)
-        self.onvif = p.get("onvif")
+        self.onvif = dict(p["onvif"]) if p.get("onvif") else None
+        self._client_onvif = None
+        from .vision import zones_options
+        zones = [{"nom": z["nom"], "rect": list(z["rect"])} for z in zones_options(p)]
         self.o = {"niveau": p.get("niveau", "global"), "visages": bool(p.get("visages", False)),
                   "expressions": bool(p.get("expressions", False)), "plaques": bool(p.get("plaques", False)),
-                  "lire_plaques": bool(p.get("lire_plaques", False)), "enregistrer": False,
-                  "zone": tuple(p["zone"]) if p.get("zone") else None}
+                  "lire_plaques": bool(p.get("lire_plaques", False)), "enregistrer": False, "zones": zones}
         self._construire(source)
+        if self.onvif:
+            self._charger_profils()
 
     # --- construction -----------------------------------------------------------
     def _construire(self, source):
@@ -96,8 +127,8 @@ class PageFlux(QWidget):
         gauche.addLayout(entete)
         self.video = VueVideo()
         self.video.message_vide = "Flux arrêté"
-        self.video.definir_zone(self.o["zone"])
-        self.video.zoneChangee.connect(self._zone_changee)
+        self.video.definir_zones(self.o["zones"])
+        self.video.zonesChangees.connect(self._zones_changees)
         gauche.addWidget(self.video, 1)
         racine.addLayout(gauche, 1)
 
@@ -114,16 +145,43 @@ class PageFlux(QWidget):
         ligne = QHBoxLayout()
         self.champ_source = QLineEdit(source)
         self.champ_source.setPlaceholderText("0, rtsp://…, lien YouTube, fichier")
+        self.champ_source.setToolTip("Modifiable même pendant le flux : Entrée pour appliquer")
+        self.champ_source.returnPressed.connect(self._source_validee)
         b_parcourir = Bouton("", "discret", "dossier")
         b_parcourir.clicked.connect(self._parcourir)
         ligne.addWidget(self.champ_source, 1)
         ligne.addWidget(b_parcourir)
         col.addLayout(ligne)
-        if self.onvif:
-            col.addWidget(etiquette(f"Caméra ONVIF · {self.onvif.get('xaddr', '')}"))
         self.b_marche = Bouton("Démarrer", "primaire", "lecture")
         self.b_marche.clicked.connect(self._basculer_marche)
         col.addWidget(self.b_marche)
+        b_renommer = Bouton("Renommer la caméra…", "discret")
+        b_renommer.clicked.connect(self._renommer)
+        col.addWidget(b_renommer)
+
+        if self.onvif:
+            col.addSpacing(4)
+            col.addWidget(separateur())
+            col.addWidget(etiquette("CAMÉRA ONVIF", "section"))
+            self.lbl_onvif = etiquette(self.onvif.get("xaddr", ""))
+            col.addWidget(self.lbl_onvif)
+            col.addWidget(QLabel("Profil vidéo"))
+            self.combo_profil = QComboBox()
+            self.combo_profil.addItem("Chargement des profils…", None)
+            self.combo_profil.setEnabled(False)
+            self.combo_profil.setToolTip("Changeable pendant que le flux tourne : il redémarre sur le nouveau profil")
+            self.combo_profil.currentIndexChanged.connect(self._profil_choisi)
+            col.addWidget(self.combo_profil)
+            self.etat_onvif = etiquette("")
+            col.addWidget(self.etat_onvif)
+            h_onvif = QHBoxLayout()
+            b_actualiser = Bouton("Actualiser", "discret")
+            b_actualiser.clicked.connect(self._charger_profils)
+            b_modif = Bouton("Modifier la connexion…", "discret", "reseau")
+            b_modif.clicked.connect(self._modifier_onvif)
+            h_onvif.addWidget(b_actualiser)
+            h_onvif.addWidget(b_modif, 1)
+            col.addLayout(h_onvif)
 
         col.addSpacing(4)
         col.addWidget(separateur())
@@ -149,12 +207,26 @@ class PageFlux(QWidget):
 
         col.addSpacing(4)
         col.addWidget(separateur())
-        col.addWidget(etiquette("ZONE", "section"))
-        col.addWidget(etiquette("Dessinez un rectangle sur l'image pour limiter la détection et suivre les entrées et "
-                                "sorties. Clic droit pour l'effacer."))
-        b_zone = Bouton("Effacer la zone")
-        b_zone.clicked.connect(lambda: (self.video.definir_zone(None), self._zone_changee(None)))
-        col.addWidget(b_zone)
+        col.addWidget(etiquette("ZONES", "section"))
+        col.addWidget(etiquette("Dessinez un ou plusieurs rectangles sur l'image : la détection se limite aux zones, "
+                                "chaque entrée et sortie est notée avec le nom de la zone, et chaque zone peut "
+                                "s'afficher seule, agrandie, dans un groupe de caméras. Clic droit sur une zone pour "
+                                "la renommer ou la supprimer."))
+        self.liste_zones = QListWidget()
+        self.liste_zones.setMaximumHeight(110)
+        self.liste_zones.itemDoubleClicked.connect(lambda _it: self._renommer_zone())
+        col.addWidget(self.liste_zones)
+        h_z = QHBoxLayout()
+        b_zr = Bouton("Renommer", "discret")
+        b_zr.clicked.connect(self._renommer_zone)
+        b_zs = Bouton("Supprimer", "discret")
+        b_zs.clicked.connect(self._supprimer_zone)
+        b_zt = Bouton("Tout effacer", "discret")
+        b_zt.clicked.connect(lambda: self._appliquer_zones([]))
+        for b in (b_zr, b_zs, b_zt):
+            h_z.addWidget(b)
+        col.addLayout(h_z)
+        self._remplir_zones()
         col.addStretch(1)
         defil.setWidget(contenu)
         droite = QVBoxLayout()
@@ -249,9 +321,151 @@ class PageFlux(QWidget):
         avant, apres = self.cfg.get("clips.avant"), self.cfg.get("clips.apres")
         self.fen.toast(f"Enregistrement d'une vidéo ({avant:g} s avant + {apres:g} s après)…")
 
-    def _zone_changee(self, zone):
-        self.o["zone"] = zone
+    # --- zones ------------------------------------------------------------------------------
+    def _remplir_zones(self):
+        self.liste_zones.clear()
+        for z in self.o["zones"]:
+            x1, y1, x2, y2 = z["rect"]
+            self.liste_zones.addItem(f"{z['nom']}   ·   {round((x2 - x1) * 100)} × {round((y2 - y1) * 100)} %")
+        if not self.o["zones"]:
+            self.liste_zones.addItem("Aucune zone : toute l'image est analysée")
+
+    def _zones_changees(self, zones):
+        """Appelée par la vue vidéo (dessin, renommage, suppression au clic droit)."""
+        anciennes = self.o["zones"]
+        self.o["zones"] = [{"nom": z["nom"], "rect": list(z["rect"])} for z in zones]
+        self._remplir_zones()
+        self.page.zones_modifiees(self, anciennes, self.o["zones"])
         self.page.sauver()
+
+    def _appliquer_zones(self, zones):
+        self.video.definir_zones(zones)
+        self._zones_changees(self.video.zones())
+
+    def _zone_courante(self):
+        i = self.liste_zones.currentRow()
+        return i if 0 <= i < len(self.o["zones"]) else None
+
+    def _renommer_zone(self):
+        i = self._zone_courante()
+        if i is None:
+            return
+        nom, ok = QInputDialog.getText(self, "Renommer la zone", "Nom de la zone :", text=self.o["zones"][i]["nom"])
+        nom = nom.strip()
+        if ok and nom:
+            if any(z["nom"] == nom for j, z in enumerate(self.o["zones"]) if j != i):
+                self.fen.toast("Une autre zone porte déjà ce nom.", "erreur")
+                return
+            zones = [dict(z) for z in self.o["zones"]]
+            zones[i]["nom"] = nom
+            self._appliquer_zones(zones)
+
+    def _supprimer_zone(self):
+        i = self._zone_courante()
+        if i is not None:
+            self._appliquer_zones([z for j, z in enumerate(self.o["zones"]) if j != i])
+
+    def rect_zone(self, nom):
+        return next((tuple(z["rect"]) for z in self.o["zones"] if z["nom"] == nom), None)
+
+    # --- source, nom et ONVIF (modifiables pendant le flux) ---------------------------------
+    def _source_validee(self):
+        if self.en_cours():
+            self.demarrer()
+            self.fen.toast(f"{self.nom} : nouvelle source appliquée.")
+        else:
+            self.page.sauver()
+
+    def _renommer(self):
+        nom, ok = QInputDialog.getText(self, "Renommer la caméra", "Nom de la caméra :", text=self.nom)
+        nom = nom.strip()
+        if ok and nom and nom != self.nom:
+            self.page.renommer_camera(self, nom)
+
+    def _mot_de_passe_onvif(self):
+        try:
+            return unquote(urlparse(self.champ_source.text().strip()).password or "")
+        except ValueError:
+            return ""
+
+    def _charger_profils(self):
+        if not self.onvif:
+            return
+        from .taches import en_arriere_plan
+        self.etat_onvif.setText("Connexion à la caméra…")
+        self.combo_profil.setEnabled(False)
+        # Rappels = méthodes de ce widget (et non des lambdas) : Qt les exécute dans le fil de l'interface.
+        self._client_en_cours = onvif.ClientOnvif(self.onvif.get("xaddr", ""), self.onvif.get("utilisateur", ""),
+                                                  self._mot_de_passe_onvif())
+        en_arriere_plan(self._client_en_cours.connecter, self._profils_recus, self._erreur_onvif)
+
+    def _vivant(self):
+        try:
+            import shiboken6
+            return shiboken6.isValid(self) and self.page is not None
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _profils_recus(self, profils):
+        if not self._vivant():
+            return
+        self._client_onvif = self._client_en_cours
+        self.combo_profil.blockSignals(True)
+        self.combo_profil.clear()
+        for p in profils:
+            self.combo_profil.addItem(f"{p['nom']} · {p['largeur']}×{p['hauteur']} · {p['encodage']}", p["jeton"])
+        i = self.combo_profil.findData(self.onvif.get("profil"))
+        self.combo_profil.setCurrentIndex(max(0, i))
+        self.combo_profil.blockSignals(False)
+        self.combo_profil.setEnabled(True)
+        self.etat_onvif.setText(f"Connecté · {len(profils)} profil(s). Changer de profil redémarre le flux.")
+
+    def _erreur_onvif(self, msg):
+        if not self._vivant():
+            return
+        self.etat_onvif.setText(f"Profils indisponibles : {msg}")
+        self.combo_profil.setEnabled(self._client_onvif is not None)
+
+    def _profil_choisi(self, _i=None):
+        jeton = self.combo_profil.currentData()
+        if not jeton or self._client_onvif is None or jeton == self.onvif.get("profil"):
+            return
+        from .taches import en_arriere_plan
+        self.combo_profil.setEnabled(False)
+        self.etat_onvif.setText("Changement de profil…")
+        self._jeton_en_cours = jeton
+        en_arriere_plan(self._client_onvif.adresse_flux, self._profil_applique, self._erreur_onvif, jeton)
+
+    def _profil_applique(self, uri):
+        if not self._vivant():
+            return
+        self.onvif["profil"] = self._jeton_en_cours
+        self.champ_source.setText(uri)
+        self.combo_profil.setEnabled(True)
+        self.etat_onvif.setText(f"Profil « {self.combo_profil.currentText().split(' · ')[0]} » appliqué.")
+        if self.en_cours():
+            self.demarrer()
+        else:
+            self.page.sauver()
+
+    def _modifier_onvif(self):
+        d = DialogueOnvif(self, self.cfg, self.nom, modification={
+            "xaddr": self.onvif.get("xaddr", ""), "utilisateur": self.onvif.get("utilisateur", ""),
+            "mot_de_passe": self._mot_de_passe_onvif(), "profil": self.onvif.get("profil")})
+        if d.exec() != QDialog.DialogCode.Accepted or not d.resultat:
+            return
+        nom, source, params = d.resultat
+        self.onvif = dict(params["onvif"])
+        self.lbl_onvif.setText(self.onvif.get("xaddr", ""))
+        self.champ_source.setText(source)
+        if nom and nom != self.nom:
+            self.page.renommer_camera(self, nom)
+        self._charger_profils()
+        if self.en_cours():
+            self.demarrer()
+        else:
+            self.page.sauver()
+        self.fen.toast(f"{self.nom} : connexion ONVIF mise à jour.", "ok")
 
     def _sync(self, *_):
         self.o["expressions"] = self.p_expr.isChecked()
@@ -266,22 +480,33 @@ class PageFlux(QWidget):
         return {"nom": self.nom, "source": self.champ_source.text().strip(), "niveau": self.o["niveau"],
                 "visages": self.p_visages.isChecked(), "expressions": self.o["expressions"],
                 "plaques": self.o["plaques"], "lire_plaques": self.i_lire.isChecked(),
-                "zone": list(self.o["zone"]) if self.o["zone"] else None, "actif": self.en_cours(),
+                "zones": [dict(z) for z in self.o["zones"]], "actif": self.en_cours(),
                 "onvif": self.onvif}
 
     # --- rafraîchissement ----------------------------------------------------------------
-    def alimenter_vue(self, vue):
-        """Envoie l'image courante dans une vignette de mur vidéo (VueVideo compacte). Renvoie l'état."""
+    def alimenter_vue(self, vue, zone=None, titre=None):
+        """Envoie l'image courante dans une vignette de mur vidéo (VueVideo compacte). Renvoie l'état.
+        zone = nom d'une zone : la vignette montre seulement cette partie de l'image, agrandie."""
         d = self.detecteur
+        titre = titre or self.nom
+        rect = self.rect_zone(zone) if zone else None
+        if zone and rect is None:
+            if vue._image is not None:
+                vue.effacer()
+            vue.message_vide = "Zone supprimée"
+            vue.regler_etat("arret", "", [], 0.0, [titre])
+            return "arret"
         if d is None:
             if vue._image is not None:
                 vue.effacer()
             vue._ref_img = vue._ref_ann = None
-            vue.regler_etat("arret", "", [], 0.0, [self.nom])
+            vue.regler_etat("arret", "", [], 0.0, [titre])
             return "arret"
         actif = self.en_cours()
         with d.lock:
             img, ann, fps, heure = d.derniere_image, d.annotations, d.fps, d.heure_image
+        if rect is not None and img is not None:
+            img, ann = decouper_zone(img, ann, rect)
         nb_p = len((ann or {}).get("personnes", []))
         if not actif:
             etat, statut = "arret", d.statut
@@ -291,13 +516,18 @@ class PageFlux(QWidget):
             etat, statut = "alerte", f"{nb_p} personne{'s' if nb_p > 1 else ''}"
         else:
             etat, statut = "direct", "En direct"
-        if img is not None and img is not getattr(vue, "_ref_img", None):
-            vue._ref_img, vue._ref_ann = img, d.annotations
+        source_img = d.derniere_image
+        if img is not None and source_img is not getattr(vue, "_ref_img", None):
+            vue._ref_img, vue._ref_ann = source_img, d.annotations
             vue.definir_image(img, ann or {}, heure)
         elif d.annotations is not None and d.annotations is not getattr(vue, "_ref_ann", None):
             vue._ref_ann = d.annotations
             vue.definir_annotations(ann or {})
-        vue.regler_etat(etat, statut if etat != "arret" else "", [], fps, [self.nom])
+        res = d.resolution
+        if res and rect is not None:
+            res = (round(res[0] * (rect[2] - rect[0])), round(res[1] * (rect[3] - rect[1])))
+        vue.regler_etat(etat, statut if etat != "arret" else "", [], fps,
+                        [titre] + ([f"{res[0]}×{res[1]}"] if res else []))
         return etat
 
     def mise_a_jour(self, visible):
@@ -328,6 +558,8 @@ class PageFlux(QWidget):
             if self.o["plaques"]:
                 compteurs += [("Véhicules", len(ann.get("vehicules", [])), "o_vehicule"),
                               ("Plaques", len(ann.get("plaques", [])), "o_plaque")]
+            if actif and d.resolution:
+                badges.append(f"{d.resolution[0]}×{d.resolution[1]}")
             if actif and d.pipeline.libelle_niveau:
                 badges.append(d.pipeline.libelle_niveau)
             if ann.get("basse_lumiere"):
@@ -345,9 +577,12 @@ class PageFlux(QWidget):
             self.video.regler_etat(etat, statut if etat != "arret" else "", compteurs, fps, badges)
             if etat in ("direct", "alerte") and d is not None:
                 delai = getattr(self.video, "delai_affichage", 0.0)
-                self.sous_titre.setText(f"{statut} · {fps:.0f} images/s · délai d'affichage {delai * 1000:.0f} ms · "
-                                        f"analyse {d.pipeline.temps_analyse * 1000:.0f} ms "
-                                        f"({d.fps_analyse:.0f}/s)")
+                res = f"{d.resolution[0]}×{d.resolution[1]} · " if d.resolution else ""
+                analyse = ("analyse en veille (rien ne bouge)" if d.veille else
+                           f"analyse {d.pipeline.temps_analyse * 1000:.0f} ms ({d.fps_analyse:.0f}/s)")
+                moteur = {"openvino": " · OpenVINO", "onnx": " · ONNX"}.get(d.pipeline.moteur, "")
+                self.sous_titre.setText(f"{statut} · {res}{fps:.0f} img/s · {analyse}{moteur}")
+                self.sous_titre.setToolTip(f"Délai d'affichage : {delai * 1000:.0f} ms")
             else:
                 self.sous_titre.setText(statut)
         titre = self.nom + (f"  ·  {nb_p}" if actif and nb_p else "")
@@ -435,9 +670,10 @@ class DialogueFlux(QDialog):
 class DialogueOnvif(QDialog):
     """Recherche les caméras ONVIF du réseau, se connecte et choisit le profil vidéo."""
 
-    def __init__(self, parent, cfg, nom_defaut):
+    def __init__(self, parent, cfg, nom_defaut, modification=None):
         super().__init__(parent)
         self.cfg = cfg
+        self.modification = modification
         self.setWindowTitle("Caméra ONVIF")
         self.setMinimumWidth(560)
         self.resultat = None
@@ -495,12 +731,19 @@ class DialogueOnvif(QDialog):
         h3.addStretch(1)
         b_annuler = Bouton("Annuler")
         b_annuler.clicked.connect(self.reject)
-        self.b_ok = Bouton("Ajouter et démarrer", "primaire")
+        self.b_ok = Bouton("Appliquer" if modification else "Ajouter et démarrer", "primaire")
         self.b_ok.setEnabled(False)
         self.b_ok.clicked.connect(self._ok)
         h3.addWidget(b_annuler)
         h3.addWidget(self.b_ok)
         v.addLayout(h3)
+        if modification:  # caméra existante (même en marche) : on reprend ses réglages et on se reconnecte
+            t.setText("Modifier la caméra ONVIF")
+            self.adresse.setText(modification.get("xaddr", ""))
+            self.user.setText(modification.get("utilisateur", ""))
+            self.mdp.setText(modification.get("mot_de_passe", ""))
+            if self.adresse.text():
+                self._connecter()
 
     def _rechercher(self):
         self.b_rechercher.setEnabled(False)
@@ -542,7 +785,9 @@ class DialogueOnvif(QDialog):
         for p in profils:
             self.combo_profil.addItem(f"{p['nom']} · {p['largeur']}×{p['hauteur']} · {p['encodage']}", p["jeton"])
         choix = onvif.choisir_profil(profils, self.cfg.get("onvif.profil"))
-        self.combo_profil.setCurrentIndex(self.combo_profil.findData(choix["jeton"]))
+        actuel = (self.modification or {}).get("profil")
+        i = self.combo_profil.findData(actuel) if actuel else -1
+        self.combo_profil.setCurrentIndex(i if i >= 0 else self.combo_profil.findData(choix["jeton"]))
         self.combo_profil.setEnabled(True)
         self.b_ok.setEnabled(True)
         self.etat.setText(f"Connecté · {len(profils)} profil(s) vidéo.")
@@ -653,6 +898,45 @@ class PageCameras(QWidget):
     def noms_cameras(self):
         return [p.nom for p in self.ordonnees() if isinstance(p, PageFlux)]
 
+    def entrees_disponibles(self):
+        """Pour les groupes : chaque caméra, suivie de chacune de ses zones (« Caméra › Zone »)."""
+        from .page_groupes import entree
+        sortie = []
+        for p in self.ordonnees():
+            if isinstance(p, PageFlux):
+                sortie.append(p.nom)
+                sortie += [entree(p.nom, z["nom"]) for z in p.o["zones"]]
+        return sortie
+
+    def renommer_camera(self, page, nom):
+        ancien = page.nom
+        nom = self._nom_unique(nom)
+        page.nom = nom
+        page.titre.setText(nom)
+        page._titre = None
+        d = page.detecteur
+        if d is not None:
+            d.nom = d.pipeline.nom = d.clips.nom = nom
+        for g in self.groupes:
+            g.camera_renommee(ancien, nom)
+        self.sauver()
+        self.fen.toast(f"« {ancien} » renommée en « {nom} ».", "ok")
+
+    def zones_modifiees(self, page, anciennes, nouvelles):
+        """Garde les groupes à jour quand une zone est renommée ou supprimée."""
+        noms_nouveaux = {z["nom"] for z in nouvelles}
+        renommees = {}
+        if len(anciennes) == len(nouvelles):
+            for a, n in zip(anciennes, nouvelles):
+                if a["nom"] != n["nom"] and list(a["rect"]) == list(n["rect"]):
+                    renommees[a["nom"]] = n["nom"]
+        for g in self.groupes:
+            for a, n in renommees.items():
+                g.zone_renommee(page.nom, a, n)
+            for z in anciennes:
+                if z["nom"] not in noms_nouveaux and z["nom"] not in renommees:
+                    g.zone_supprimee(page.nom, z["nom"])
+
     def etat_camera(self, nom):
         p = self.page_par_nom(nom)
         d = p.detecteur if p is not None else None
@@ -709,7 +993,7 @@ class PageCameras(QWidget):
         if not noms:
             self.fen.toast("Ajoutez d'abord au moins une caméra, puis créez un groupe.")
             return
-        d = DialogueGroupe(self, noms, f"Groupe {len(self.groupes) + 1}", noms, 0)
+        d = DialogueGroupe(self, self.entrees_disponibles(), f"Groupe {len(self.groupes) + 1}", noms, 0)
         if d.exec() == QDialog.DialogCode.Accepted and d.resultat:
             nom, cameras, colonnes = d.resultat
             g = self._ajouter_groupe(nom, cameras, colonnes)

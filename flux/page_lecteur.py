@@ -68,7 +68,7 @@ class PageLecteur(QWidget):
         self._glisse = False
         self._tache = None
         self.o = {"niveau": "global", "visages": True, "expressions": False, "plaques": False, "lire_plaques": False,
-                  "zone": None}
+                  "zones": []}
         self._construire()
         if MULTIMEDIA:
             self.lecteur = QMediaPlayer(self)
@@ -130,7 +130,7 @@ class PageLecteur(QWidget):
         gauche = QVBoxLayout()
         self.video = VueVideo(zone_active=True)
         self.video.message_vide = "Collez un lien ou ouvrez un fichier"
-        self.video.zoneChangee.connect(lambda z: self.o.__setitem__("zone", z))
+        self.video.zonesChangees.connect(lambda zs: self.o.__setitem__("zones", zs))
         gauche.addWidget(self.video, 1)
 
         ctl = QHBoxLayout()
