@@ -1,3 +1,40 @@
+Beta Version 0.3.3 alpha
+* Bug résolus
+  - « Impossible de charger le modèle yolo26s.pt : 416 Client Error: Range Not Satisfiable » :
+    un téléchargement interrompu laissait un fichier incomplet que le téléchargeur d'Ultralytics
+    essayait de reprendre. Flux vérifie maintenant chaque modèle (fichier tronqué ou corrompu
+    supprimé automatiquement), le retélécharge depuis zéro avec plusieurs essais, contrôle la taille
+    reçue, et affiche la progression (25 %, 50 %, 75 %).
+  - Recherche ONVIF « WinError 10065 » (hôte inaccessible) : la recherche passe maintenant par chaque
+    carte réseau séparément (une carte VPN ou virtuelle en erreur est ignorée), puis par diffusion,
+    puis sonde directement chaque adresse du réseau local si aucune caméra n'a répondu.
+  - Image de webcam brouillée (violet, bandes) : retour au pilote Windows par défaut ; DirectShow
+    reste disponible dans Réglages › Système › Pilote des webcams. Mode faible latence adouci.
++ Ajouts
+  - Groupes de caméras : plusieurs caméras affichées côte à côte dans un seul onglet (mur vidéo).
+    Ajouter › « Groupe de caméras (plusieurs vues)… » : nom, caméras cochées, ordre, nombre de
+    colonnes (automatique par défaut). Double-clic sur une vignette pour l'agrandir, clic droit pour
+    ouvrir la caméra, la démarrer/l'arrêter ou la retirer du groupe. Bouton « Plein écran » (Échap pour
+    revenir) pour un vrai mur de surveillance sur un écran dédié, « Tout démarrer / Tout arrêter »,
+    voyant du groupe (rouge dès qu'une caméra détecte quelqu'un). Les vignettes sont réduites et
+    rafraîchies plus doucement : un groupe ne coûte presque rien en plus. Les groupes sont
+    enregistrés dans config.json (« groupes »).
+  - Version Linux (Linux Mint, Ubuntu, Debian) : installer.sh fait tout (paquets du système, Python,
+    PyTorch pour processeur ou NVIDIA, dépendances, modèle de détection, icône, lanceur dans le menu
+    et sur le bureau, démarrage automatique et veille désactivée en option), Flux.sh pour lancer.
+    Testé pour les mini-PC sans carte graphique (Minisforum GK41).
+  - Réglages de départ adaptés à la machine : au tout premier lancement, un petit processeur sans
+    carte NVIDIA (4 cœurs ou moins) démarre en niveau Rapide, analyse une image sur 2, animations
+    coupées, vidéos plus légères. Rien ne change pour une machine confortable ni pour une
+    installation existante.
+  - Vidéos des passages : Flux garde en mémoire les dernières secondes de chaque caméra ; à chaque
+    alerte (ou chaque passage, ou la liste noire seulement), il enregistre une courte vidéo MP4 avec
+    les secondes AVANT l'alerte, prolongée tant que l'activité continue. Envoi automatique par
+    mail, Telegram, ntfy, Discord et webhook ; WhatsApp et SMS reçoivent l'alerte en texte.
+    Bouton « vidéo » sur chaque caméra pour en enregistrer une à la main. Catégorie « Vidéos » dans
+    le journal (double-clic pour regarder). Réglages › Vidéos des passages. Nouvelle dépendance :
+    imageio-ffmpeg (relancer installer.bat une fois).
+
 Beta Version 0.3.2 alpha
 * Bug résolus
   - Latence des caméras en direct : l'image n'attend plus la fin de l'analyse. Chaque image de la

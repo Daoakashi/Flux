@@ -1,0 +1,17 @@
+# Jamais sur GitHub : réglages (mots de passe, jetons), base de données, environnement, modèles, vidéos, sauvegardes
+config.json
+flux.db
+flux.db-wal
+flux.db-shm
+flux_erreur.log
+venv/
+.venv/
+modeles/
+detections/
+sauvegardes/
+publication/
+__pycache__/
+*.pyc
+*.pt
+flux.ico
+flux.png

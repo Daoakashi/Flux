@@ -1,4 +1,4 @@
-# Flux 2.0 — installer d'abord PyTorch avec CUDA pour la carte NVIDIA (voir LISEZMOI.txt),
+# Flux — installer d'abord PyTorch avec CUDA pour la carte NVIDIA (voir LISEZMOI.txt),
 # puis :  pip install -r requirements.txt
 
 # Détection (YOLO26, YOLO11, RT-DETR)
@@ -15,6 +15,9 @@ onnxruntime>=1.18
 onnx>=1.16
 hsemotion-onnx>=0.3
 rapidocr>=3.0
+
+# Vidéos des passages (ffmpeg intégré : MP4 H.264 lisible sur téléphone)
+imageio-ffmpeg>=0.5
 
 # Liens YouTube, Instagram, etc.
 yt-dlp[default]>=2026.8.19  # inclut yt-dlp-ejs, requis pour YouTube (avec Deno)
