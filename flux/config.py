@@ -101,7 +101,7 @@ CATEGORIES = [
     ("apparence", "Apparence"), ("detection", "Détection"), ("basse_lumiere", "Basse lumière"),
     ("visages", "Visages et reconnaissance"), ("plaques", "Plaques"), ("base", "Base de données"),
     ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
-    ("clips", "Vidéos des passages"), ("lecteur", "Lecteur vidéo"),
+    ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("lecteur", "Lecteur vidéo"),
     ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
 ]
 CATEGORIES_CACHEES = {"developpeur"}  # visibles seulement en mode développeur
@@ -297,6 +297,39 @@ SCHEMA = [
     R("webhook.actif", "notifications", "Webhook générique", "bool", False,
       "Envoie un JSON (Home Assistant, n8n, Zapier…).", avance=True),
     R("webhook.url", "notifications", "Adresse du webhook", "texte", "", "", avance=True),
+
+    # --- FluxLite (application Android) ----------------------------------------------------
+    R("fluxlite.actif", "fluxlite", "Serveur FluxLite", "bool", False,
+      "Permet aux téléphones Android (application FluxLite) de voir les caméras et de recevoir les alertes. Les "
+      "comptes, les entreprises et la clé du serveur se gèrent dans la page FluxLite.", groupe="Serveur"),
+    R("fluxlite.nom", "fluxlite", "Nom du serveur", "texte", "",
+      "Affiché dans l'application, ex. « Surveillance Magasin Centre ». Vide = Flux suivi d'un code."),
+    R("fluxlite.port", "fluxlite", "Port", "int", 47810,
+      "Port HTTPS ouvert sur ce PC. À ouvrir dans le pare-feu, et dans la box pour un accès depuis l'extérieur.",
+      None, 1024, 65535, 1),
+    R("fluxlite.inscription", "fluxlite", "Inscriptions depuis le téléphone", "bool", True,
+      "Désactivé : seuls les comptes créés dans la page FluxLite peuvent se connecter.", groupe="Comptes"),
+    R("fluxlite.validation_manuelle", "fluxlite", "Valider chaque nouveau compte", "bool", True,
+      "Recommandé. Désactivé : un compte dont la société correspond exactement à une entreprise est actif tout de "
+      "suite ; les autres attendent votre validation."),
+    R("fluxlite.duree_session", "fluxlite", "Rester connecté pendant", "int", 30,
+      "Ensuite, le téléphone redemande le mot de passe.", None, 1, 365, 1, " jours"),
+    R("fluxlite.responsable", "fluxlite", "Responsable du traitement (RGPD)", "texte", "",
+      "Nom de la société qui exploite les caméras, affiché dans les conditions d'utilisation de l'application.",
+      groupe="Données personnelles"),
+    R("fluxlite.contact", "fluxlite", "Contact pour les données personnelles", "texte", "",
+      "Mail où les utilisateurs exercent leurs droits (accès, rectification, effacement)."),
+    R("fluxlite.conservation_journal", "fluxlite", "Conserver les alertes envoyées aux téléphones", "int", 7,
+      "Le journal de l'application et ses photos sont effacés ensuite. 0 = sans limite.", None, 0, 365, 1, " jours"),
+    R("fluxlite.actions", "fluxlite", "Envoyer aussi les actions", "bool", False,
+      "Entrées, sorties et stationnements dans le journal du téléphone, en plus des alertes."),
+    R("fluxlite.largeur", "fluxlite", "Largeur des images", "int", 960,
+      "Plus petit = moins de données mobiles.", None, 320, 1920, 32, " px", groupe="Vidéo"),
+    R("fluxlite.qualite", "fluxlite", "Qualité JPEG", "int", 70, "", None, 30, 95, 1, " %"),
+    R("fluxlite.fps", "fluxlite", "Images par seconde (maximum)", "int", 8, "", None, 1, 25, 1),
+    R("fluxlite.cadres", "fluxlite", "Cadres de détection sur l'image", "bool", True),
+    R("fluxlite.flux_par_compte", "fluxlite", "Vidéos simultanées par compte", "int", 6, "", None, 1, 30, 1, "",
+      True),
 
     # --- Vidéos des passages -----------------------------------------------------------
     R("clips.actif", "clips", "Enregistrer des vidéos des passages", "bool", True,

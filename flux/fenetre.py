@@ -20,6 +20,7 @@ from .config import DOSSIER_MODELES, FICHIER_BASE, RACINE, Config, identite, niv
 from .page_cameras import PageCameras
 from .page_journal import PageJournal
 from .page_lecteur import PageLecteur
+from .page_mobile import PageFluxLite
 from .page_personnes import PagePersonnes
 from .page_reglages import PageReglages
 from .notifications import Notifieur
@@ -30,7 +31,7 @@ from .widgets import Bouton, BoutonNav, Logo, Toasts, etiquette
 from . import vision
 
 PAGES = [("cameras", "Caméras", "cameras"), ("lecteur", "Lecteur", "lecteur"), ("personnes", "Personnes", "personnes"),
-         ("journal", "Journal", "journal"), ("reglages", "Réglages", "reglages")]
+         ("journal", "Journal", "journal"), ("mobile", "FluxLite", "telephone"), ("reglages", "Réglages", "reglages")]
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +388,9 @@ class FenetrePrincipale(QMainWindow):
         self._construire()
         self.toasts = Toasts(self.centralWidget())
         self.page_cameras.restaurer()
+        self.page_mobile.initialiser()
         self.aller("cameras")
+        self.maj_badge_fluxlite()
         self._geometrie()
         self.setWindowOpacity(cfg.get("apparence.opacite") / 100)
         cfg.abonner(self._reglage_change)
@@ -470,9 +473,10 @@ class FenetrePrincipale(QMainWindow):
         self.page_lecteur = PageLecteur(self)
         self.page_personnes = PagePersonnes(self)
         self.page_journal = PageJournal(self)
+        self.page_mobile = PageFluxLite(self)
         self.page_reglages = PageReglages(self)
         self.pages = {"cameras": self.page_cameras, "lecteur": self.page_lecteur, "personnes": self.page_personnes,
-                      "journal": self.page_journal, "reglages": self.page_reglages}
+                      "journal": self.page_journal, "mobile": self.page_mobile, "reglages": self.page_reglages}
         for p in self.pages.values():
             self.pile.addWidget(p)
         zv.addWidget(self.pile)
@@ -545,6 +549,13 @@ class FenetrePrincipale(QMainWindow):
             self.nav["journal"].compteur = 0
             self.nav["journal"].update()
             self.page_journal.rafraichir()
+        elif cle == "mobile":
+            self.maj_badge_fluxlite()
+
+    def maj_badge_fluxlite(self):
+        """Pastille sur « FluxLite » : nombre de comptes qui attendent votre validation."""
+        self.nav["mobile"].compteur = self.page_mobile.nb_en_attente()
+        self.nav["mobile"].update()
 
     def fondu(self, widget):
         """Fondu d'apparition d'une page. Sûr même si l'on change de page très vite."""
@@ -601,6 +612,8 @@ class FenetrePrincipale(QMainWindow):
             self._maj_barre_etat()
         if cle.startswith("developpeur."):
             self.appliquer_identite()
+        if cle.startswith("fluxlite."):
+            self.page_mobile.reglage_change(cle)
 
     def appliquer_identite(self):
         """Nom, titre, version et logo (personnalisables en mode développeur)."""
@@ -846,6 +859,9 @@ class FenetrePrincipale(QMainWindow):
             except queue.Empty:
                 break
             self._journaliser(e)
+            self.page_mobile.evenement(e)
+            if e.get("source") == "FluxLite" and "à valider" in e.get("texte", ""):
+                self.maj_badge_fluxlite()
             try:
                 self._notifier(e)
             except Exception as ex:  # noqa: BLE001
@@ -866,6 +882,7 @@ class FenetrePrincipale(QMainWindow):
         etats = self.page_cameras.mise_a_jour(page is self.page_cameras)
         self.page_lecteur.mise_a_jour(page is self.page_lecteur)
         self.logo.animer(any(x in ("direct", "alerte") for x in etats))
+        self.page_mobile.cycle()
         if page is self.page_personnes:
             self.page_personnes.rafraichir()
 
@@ -891,6 +908,7 @@ class FenetrePrincipale(QMainWindow):
         else:
             self.page_cameras.sauver()  # avant l'arrêt, pour mémoriser les caméras actives
         self.page_lecteur.arreter()
+        self.page_mobile.fermer()
         self.page_cameras.tout_arreter()
         self.cfg.sauver()
 

@@ -412,6 +412,12 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.addEllipse(QRectF(4, 4, 12, 12))
         pp.moveTo(14.5, 14.5)
         pp.lineTo(20, 20)
+    elif nom == "telephone":
+        pp.addRoundedRect(QRectF(6.5, 2.5, 11, 19), 2.6, 2.6)
+        pp.moveTo(10.5, 18.3)
+        pp.lineTo(13.5, 18.3)
+        pp.moveTo(19.5, 7)
+        pp.cubicTo(20.8, 8.5, 20.8, 11.5, 19.5, 13)
     elif nom == "theme":
         pp.addEllipse(QRectF(4, 4, 16, 16))
         p.drawPath(pp)
