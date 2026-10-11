@@ -363,6 +363,7 @@ class Detecteur(threading.Thread):
         self._t_directe = 0.0
         self.resolution = None  # (largeur, hauteur) du flux, affichée dans l'interface
         self.veille = False     # analyse en pause : image vide et immobile
+        self.detection_coupee = False  # détection désactivée (globalement ou pour cette caméra)
         self._ref_mouvement = None
         self._t_analyse = 0.0
         self.pipeline = Pipeline(nom, cfg, options, self._recevoir, base)
@@ -614,7 +615,17 @@ class Detecteur(threading.Thread):
             self.statut = "En cours"
             n += 1
             self.resolution = (frame.shape[1], frame.shape[0])
-            analyser = n % max(1, int(self.cfg.get("detection.une_image_sur"))) == 0 or n == 1 or ann is None
+            if not self.detection_active():
+                # Détection coupée : l'image est affichée et enregistrée telle quelle, sans analyse ni alerte.
+                self.detection_coupee = True
+                self.veille = False
+                ann = self.annotations_vides(frame)
+                analyser = False
+            else:
+                if self.detection_coupee:
+                    self.detection_coupee = False
+                    ann = None  # reprise : nouvelle analyse tout de suite
+                analyser = n % max(1, int(self.cfg.get("detection.une_image_sur"))) == 0 or n == 1 or ann is None
             if analyser and not self._analyse_utile(frame, ann):
                 analyser = False
                 self.veille = True
@@ -657,6 +668,17 @@ class Detecteur(threading.Thread):
 
     def arreter(self):
         self.stop_event.set()
+
+    def detection_active(self):
+        """Interrupteur général (Réglages › Détection ou FluxLite) et interrupteur de la caméra."""
+        return bool(self.cfg.get("detection.actif")) and bool(self.o.get("detection", True))
+
+    def annotations_vides(self, frame):
+        h, w = frame.shape[:2]
+        zs = [dict(z) for z in getattr(self.pipeline, "_zs", [])]
+        return {"w": w, "h": h, "personnes": [], "vehicules": [], "plaques": [], "visages": [], "pistes": [],
+                "zones": zs, "zone": zs[0]["rect"] if zs else None, "basse_lumiere": False, "luminance": 0,
+                "image_affichee": None, "detection_coupee": True}
 
 
 class Analyseur(threading.Thread):

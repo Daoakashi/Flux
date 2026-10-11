@@ -1,3 +1,27 @@
+Beta Version 0.9.1 alpha
++ Ajouts
+  - Flux Remote : programme pour PC (Windows et Linux) qui pilote Flux à distance, comme une
+    télécommande. Même connexion que FluxLite : clé du serveur, compte validé dans la page FluxLite.
+  - Nouvelles commandes à distance (comptes autorisés) : démarrer ou arrêter une caméra, enregistrer
+    une vidéo sur le PC, changer le niveau de scan, régler le délai entre deux notifications et entre
+    deux mails. Chaque commande est notée dans le journal.
+
+Beta Version 0.9.0 alpha
++ Ajouts
+  - Interrupteur « Détection » : en haut de la page Caméras pour toutes les caméras, et une pastille
+    « Détection » sur chaque caméra. Désactivée, l'image reste affichée (et visible sur FluxLite) mais
+    rien n'est analysé : aucune alerte, aucun mail, aucune notification. La barre d'état l'indique.
+    Aussi dans Réglages › Détection › Détection active.
+  - Pilotage à distance depuis FluxLite 1.1 : un compte autorisé peut activer ou désactiver la
+    détection (de ses caméras ou de tout le PC) et les notifications de Flux : mails, WhatsApp,
+    Telegram, SMS, appel, ntfy, Discord, webhook. Droit accordé compte par compte dans la page
+    FluxLite (colonne « Pilotage », clic droit › Autoriser le pilotage à distance). Chaque action est
+    notée dans le journal avec le nom de la personne.
+  - Publication en un clic : onglet « Actions » du dépôt GitHub › « Publier une version de Flux ».
+    L'archive et les notes sont créées automatiquement depuis version.json et CHANGELOG.txt.
+* À savoir pour la mise à jour
+  - Les comptes FluxLite existants sont gardés ; le droit de pilotage est désactivé par défaut.
+
 Beta Version 0.8.0 alpha
 + Ajouts
   - FluxLite : application Android pour vos clients. Nouvelle page « FluxLite » dans la barre latérale.

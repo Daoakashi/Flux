@@ -40,7 +40,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION_API = 1
+VERSION_API = 3  # 2 : pilotage à distance · 3 : caméras, niveau de scan et délais (Flux Remote)
 VERSION_CGU = "2026-10"   # à changer quand les conditions d'utilisation de l'application changent
 PORT_DEFAUT = 47810
 ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # base32 de Crockford : pas de I, L, O, U (aucune confusion)
@@ -278,6 +278,9 @@ class Comptes:
             self._c.execute("PRAGMA journal_mode=WAL")
             self._c.execute("PRAGMA foreign_keys=ON")
             self._c.executescript(SCHEMA_SQL)
+            colonnes = {r[1] for r in self._c.execute("PRAGMA table_info(comptes)")}
+            if "pilotage" not in colonnes:  # base créée par Flux 0.8 : ajout du droit de pilotage
+                self._c.execute("ALTER TABLE comptes ADD COLUMN pilotage INTEGER NOT NULL DEFAULT 0")
             self._c.commit()
 
     def _x(self, sql, args=(), commit=True):
@@ -346,7 +349,7 @@ class Comptes:
     def comptes(self):
         return self._tous("SELECT c.id, c.mail, c.nom, c.prenom, c.societe, c.entreprise_id, c.statut, c.cree_le, "
                           "c.derniere_connexion, c.derniere_ip, c.appareil, c.version_app, c.cgu_version, c.cgu_le, "
-                          "e.nom AS entreprise, (SELECT COUNT(*) FROM sessions s WHERE s.compte_id = c.id "
+                          "c.pilotage, e.nom AS entreprise, (SELECT COUNT(*) FROM sessions s WHERE s.compte_id = c.id "
                           "AND s.expire_le > ?) AS sessions "
                           "FROM comptes c LEFT JOIN entreprises e ON e.id = c.entreprise_id "
                           "ORDER BY c.statut = 'attente' DESC, c.nom COLLATE NOCASE, c.prenom COLLATE NOCASE",
@@ -360,19 +363,20 @@ class Comptes:
         return self._un("SELECT * FROM comptes WHERE mail = ?", (mail.strip(),))
 
     def creer_compte(self, mail, mdp, nom, prenom, societe="", statut="attente", entreprise_id=None, appareil="",
-                     version_app="", cgu_version=None):
+                     version_app="", cgu_version=None, pilotage=False):
         try:
             return self._x("INSERT INTO comptes (mail, nom, prenom, societe, entreprise_id, statut, hash, cree_le, "
-                           "appareil, version_app, cgu_version, cgu_le) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                           "appareil, version_app, cgu_version, cgu_le, pilotage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                            (mail.strip()[:254], nom.strip()[:60], prenom.strip()[:60], societe.strip()[:80],
                             entreprise_id, statut, hacher_mot_de_passe(mdp), time.time(), appareil[:120],
-                            version_app[:40], cgu_version, time.time() if cgu_version else None)).lastrowid
+                            version_app[:40], cgu_version, time.time() if cgu_version else None,
+                            int(bool(pilotage)))).lastrowid
         except sqlite3.IntegrityError:
             raise ErreurServeur("un compte existe déjà avec cette adresse mail") from None
 
     def modifier_compte(self, cid, **champs):
         permis = {"nom", "prenom", "statut", "entreprise_id", "societe", "derniere_connexion", "derniere_ip",
-                  "appareil", "version_app", "cgu_version", "cgu_le"}
+                  "appareil", "version_app", "cgu_version", "cgu_le", "pilotage"}
         champs = {k: v for k, v in champs.items() if k in permis}
         if champs:
             self._x(f"UPDATE comptes SET {', '.join(k + ' = ?' for k in champs)} WHERE id = ?",
@@ -463,6 +467,57 @@ class Comptes:
 
 
 # ---------------------------------------------------------------------------
+# Pilotage à distance (FluxLite 1.1) : seulement pour les comptes autorisés dans Flux
+# ---------------------------------------------------------------------------
+# (réglage, libellé, réglages qui doivent être remplis pour que le canal puisse fonctionner)
+PILOTABLES = [
+    ("notif.actif", "Notifications (tous les canaux)", ()),
+    ("mail.actif", "Mails", ("mail.utilisateur", "mail.destinataire")),
+    ("whatsapp.actif", "WhatsApp", ("whatsapp.numero",)),
+    ("telegram.actif", "Telegram", ("telegram.jeton", "telegram.chat")),
+    ("sms.actif", "SMS", ("sms.numero",)),
+    ("appel.actif", "Appel téléphonique", ("appel.numero",)),
+    ("ntfy.actif", "Notification push (ntfy)", ("ntfy.sujet",)),
+    ("discord.actif", "Discord", ("discord.webhook",)),
+    ("webhook.actif", "Webhook", ("webhook.url",)),
+]
+LIBELLES_PILOTAGE = {c: l for c, l, _ in PILOTABLES}
+LIBELLES_PILOTAGE["detection.actif"] = "Détection (toutes les caméras)"
+# Commandes ajoutées dans Flux 0.9.1 (Flux Remote) : type de valeur attendu pour chacune
+LIBELLES_PILOTAGE.update({"detection.niveau": "Niveau de scan", "notif.delai": "Délai entre deux notifications",
+                          "mail.delai": "Délai entre deux mails"})
+COMMANDES_CAMERA = {"camera.detection": "détection", "camera.marche": "marche", "camera.clip": "vidéo"}
+NIVEAUX_PILOTABLES = ["rapide", "equilibre", "precis", "maximum"]
+
+
+def valeur_pilotage(cle, valeur):
+    """Vérifie et convertit la valeur reçue pour une commande. Lève ErreurServeur si elle est invalide."""
+    if cle == "detection.niveau":
+        if valeur not in NIVEAUX_PILOTABLES:
+            raise ErreurServeur("Niveau de scan inconnu.")
+        return valeur
+    if cle in ("notif.delai", "mail.delai"):
+        if isinstance(valeur, bool) or not isinstance(valeur, (int, float)) or not 0 <= valeur <= 1440:
+            raise ErreurServeur("Délai invalide (0 à 1440 minutes).")
+        return float(valeur)
+    if not isinstance(valeur, bool):
+        raise ErreurServeur("Valeur invalide.")
+    return valeur
+
+
+class PiloteVide:
+    """Interface attendue par le serveur pour lire et changer les réglages de Flux.
+
+    demander("etat", cameras=[noms autorisés]) -> {"detection": bool, "cameras": [...], "canaux": [...]}
+    demander("regler", cle=…, valeur=bool, camera=nom ou None, auteur="Prénom Nom") -> nouvel état
+    Flux exécute ces demandes dans le fil de l'interface (voir page_mobile.Pilote).
+    """
+
+    def demander(self, action, **parametres):
+        raise ErreurServeur("Le pilotage à distance n'est pas disponible sur ce PC.")
+
+
+# ---------------------------------------------------------------------------
 # Caméras : ce que l'interface publie pour le serveur
 # ---------------------------------------------------------------------------
 class FournisseurVide:
@@ -542,8 +597,10 @@ class ServeurFluxLite:
     quel fil.
     """
 
-    def __init__(self, dossier, reglages, fournisseur=None, rappel=None, dessiner=None, version_flux=""):
+    def __init__(self, dossier, reglages, fournisseur=None, rappel=None, dessiner=None, version_flux="",
+                 pilote=None):
         self.dossier = dossier
+        self.pilote = pilote or PiloteVide()
         self.reglages = reglages
         self.fournisseur = fournisseur or FournisseurVide()
         self.rappel = rappel or (lambda texte, niveau="info": None)
@@ -567,8 +624,12 @@ class ServeurFluxLite:
 
     # --- réglages --------------------------------------------------------------------
     def r(self, cle, defaut=None):
+        return self.reglage(f"fluxlite.{cle}", defaut)
+
+    def reglage(self, cle, defaut=None):
+        """Réglage quelconque de Flux (lecture seule, sûre entre fils)."""
         try:
-            v = self.reglages.get(f"fluxlite.{cle}")
+            v = self.reglages.get(cle)
         except Exception:  # noqa: BLE001
             v = None
         return defaut if v is None else v
@@ -855,6 +916,11 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                 return self.photo(compte, p[4])
             if route == "alertes/attente" and methode == "GET":
                 return self.attente(compte)
+            if route == "pilotage":
+                if methode == "GET":
+                    return self.pilotage(compte)
+                if methode == "POST":
+                    return self.piloter(compte)
             return self.erreur(404, "Adresse inconnue.")
         except ErreurServeur as e:
             self.erreur(400, str(e))
@@ -867,6 +933,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def info(self):
         a = self.appli
         self.json({"application": "Flux", "nom": a.nom, "api": VERSION_API, "version_flux": a.version_flux,
+                   "fonctions": ["pilotage", "pilotage_cameras", "niveau", "delais"],
                    "inscription": bool(a.r("inscription", True)),
                    "validation_manuelle": bool(a.r("validation_manuelle", True)), "cgu_version": VERSION_CGU,
                    "responsable": (a.r("responsable", "") or "").strip(), "contact": (a.r("contact", "") or "").strip(),
@@ -943,7 +1010,8 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         return {"id": c["id"], "mail": c["mail"], "nom": c["nom"], "prenom": c["prenom"], "societe": c["societe"],
                 "entreprise": e["nom"] if e else None, "statut": c["statut"], "cree_le": c["cree_le"],
                 "derniere_connexion": c["derniere_connexion"], "cgu_version": c["cgu_version"],
-                "cgu_a_jour": c["cgu_version"] == VERSION_CGU, "sessions": sessions, "serveur": a.nom}
+                "cgu_a_jour": c["cgu_version"] == VERSION_CGU, "sessions": sessions, "serveur": a.nom,
+                "pilotage": bool(c.get("pilotage"))}
 
     def modifier_profil(self, c, s):
         d = self.corps()
@@ -1008,8 +1076,40 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                 res = cam.get("resolution")
                 liste.append({"id": id_camera(cam["nom"]), "nom": cam["nom"], "etat": cam.get("etat", "arret"),
                               "personnes": int(cam.get("personnes", 0)), "fps": round(float(cam.get("fps", 0)), 1),
-                              "resolution": f"{res[0]}×{res[1]}" if res else None})
-        self.json({"cameras": liste, "serveur": self.appli.nom, "entreprise": bool(c.get("entreprise_id"))})
+                              "resolution": f"{res[0]}×{res[1]}" if res else None,
+                              "detection": bool(cam.get("detection", True))})
+        self.json({"cameras": liste, "serveur": self.appli.nom, "entreprise": bool(c.get("entreprise_id")),
+                   "detection": bool(self.appli.reglage("detection.actif", True)),
+                   "pilotage": bool(c.get("pilotage"))})
+
+    # --- pilotage à distance ---------------------------------------------------------------------
+    def _droit_pilotage(self, c):
+        if not c.get("pilotage"):
+            self.erreur(403, "Votre compte n'est pas autorisé à piloter Flux. Demandez ce droit à votre responsable.")
+            return False
+        return True
+
+    def pilotage(self, c):
+        if self._droit_pilotage(c):
+            self.json(self.appli.pilote.demander("etat", cameras=self.appli.cameras_autorisees(c)))
+
+    def piloter(self, c):
+        if not self._droit_pilotage(c):
+            return
+        d = self.corps()
+        cle = str(d.get("cle", ""))
+        valeur = valeur_pilotage(cle, d.get("valeur"))
+        autorisees = self.appli.cameras_autorisees(c)
+        camera = None
+        if cle in COMMANDES_CAMERA:
+            camera = nom_depuis_id(str(d.get("camera", "")))
+            if camera is None or camera not in autorisees:
+                return self.erreur(404, "Caméra introuvable ou non autorisée.")
+        elif cle not in LIBELLES_PILOTAGE:
+            return self.erreur(400, "Ce réglage ne peut pas être piloté à distance.")
+        etat = self.appli.pilote.demander("regler", cle=cle, valeur=valeur, camera=camera, cameras=autorisees,
+                                          auteur=f"{c['prenom']} {c['nom']}")
+        self.json(etat)
 
     def _jpeg(self, nom, largeur=None):
         a = self.appli

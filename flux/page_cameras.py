@@ -79,7 +79,8 @@ class PageFlux(QWidget):
         self._client_onvif = None
         from .vision import zones_options
         zones = [{"nom": z["nom"], "rect": list(z["rect"])} for z in zones_options(p)]
-        self.o = {"niveau": p.get("niveau", "global"), "visages": bool(p.get("visages", False)),
+        self.o = {"niveau": p.get("niveau", "global"), "detection": bool(p.get("detection", True)),
+                  "visages": bool(p.get("visages", False)),
                   "expressions": bool(p.get("expressions", False)), "plaques": bool(p.get("plaques", False)),
                   "lire_plaques": bool(p.get("lire_plaques", False)), "enregistrer": False, "zones": zones}
         self._construire(source)
@@ -108,13 +109,16 @@ class PageFlux(QWidget):
         bloc.addWidget(self.sous_titre)
         entete.addLayout(bloc)
         entete.addStretch(1)
+        self.p_detection = Pastille("Détection", "o_personne")
+        self.p_detection.setToolTip("Analyse de cette caméra (personnes, alertes). Désactivée : l'image reste "
+                                    "affichée, sans alerte ni notification.")
         self.p_visages = Pastille("Visages", "o_visage")
         self.p_expr = Pastille("Expressions", "o_visage")
         self.p_plaques = Pastille("Plaques", "o_plaque")
         self.p_visages.setToolTip("Détecter les visages et reconnaître les personnes de la base")
         self.p_expr.setToolTip("Reconnaître l'expression de chaque visage (active aussi les visages)")
         self.p_plaques.setToolTip("Détecter les véhicules et leurs plaques d'immatriculation")
-        for w in (self.p_visages, self.p_expr, self.p_plaques):
+        for w in (self.p_detection, self.p_visages, self.p_expr, self.p_plaques):
             entete.addWidget(w)
         b_capture = Bouton("", "discret", "capture")
         b_capture.setToolTip("Enregistrer une capture d'écran annotée")
@@ -236,12 +240,13 @@ class PageFlux(QWidget):
         droite.addWidget(b_fermer)
         racine.addLayout(droite)
 
+        self.p_detection.regler(self.o["detection"])
         self.p_visages.regler(self.o["visages"])
         self.p_expr.regler(self.o["expressions"])
         self.p_plaques.regler(self.o["plaques"])
         self.i_lire.regler(self.o["lire_plaques"])
         self.rep_lire.ouvrir(self.o["plaques"], instantane=True)
-        for w in (self.p_visages, self.p_expr, self.p_plaques, self.i_lire, self.i_enreg):
+        for w in (self.p_detection, self.p_visages, self.p_expr, self.p_plaques, self.i_lire, self.i_enreg):
             w.toggled.connect(self._sync)
         self.p_plaques.toggled.connect(self.rep_lire.ouvrir)
         self.combo_niveau.currentIndexChanged.connect(self._niveau_change)
@@ -467,7 +472,13 @@ class PageFlux(QWidget):
             self.page.sauver()
         self.fen.toast(f"{self.nom} : connexion ONVIF mise à jour.", "ok")
 
+    def regler_detection(self, actif):
+        """Depuis FluxLite (pilotage à distance) : même effet qu'un clic sur la pastille."""
+        self.p_detection.regler(bool(actif))
+        self._sync()
+
     def _sync(self, *_):
+        self.o["detection"] = self.p_detection.isChecked()
         self.o["expressions"] = self.p_expr.isChecked()
         self.o["visages"] = self.p_visages.isChecked() or self.o["expressions"]
         self.o["plaques"] = self.p_plaques.isChecked()
@@ -478,7 +489,7 @@ class PageFlux(QWidget):
 
     def exporter(self):
         return {"nom": self.nom, "source": self.champ_source.text().strip(), "niveau": self.o["niveau"],
-                "visages": self.p_visages.isChecked(), "expressions": self.o["expressions"],
+                "detection": self.o["detection"], "visages": self.p_visages.isChecked(), "expressions": self.o["expressions"],
                 "plaques": self.o["plaques"], "lire_plaques": self.i_lire.isChecked(),
                 "zones": [dict(z) for z in self.o["zones"]], "actif": self.en_cours(),
                 "onvif": self.onvif}
@@ -564,6 +575,8 @@ class PageFlux(QWidget):
                 badges.append(d.pipeline.libelle_niveau)
             if ann.get("basse_lumiere"):
                 badges.append("Basse lumière")
+            if actif and d.detection_coupee:
+                badges.append("Détection désactivée")
             if visible and img is not None and img is not self._img_ref:
                 self._img_ref = img
                 self._ann_ref = d.annotations
@@ -578,7 +591,8 @@ class PageFlux(QWidget):
             if etat in ("direct", "alerte") and d is not None:
                 delai = getattr(self.video, "delai_affichage", 0.0)
                 res = f"{d.resolution[0]}×{d.resolution[1]} · " if d.resolution else ""
-                analyse = ("analyse en veille (rien ne bouge)" if d.veille else
+                analyse = ("détection désactivée" if d.detection_coupee else
+                           "analyse en veille (rien ne bouge)" if d.veille else
                            f"analyse {d.pipeline.temps_analyse * 1000:.0f} ms ({d.fps_analyse:.0f}/s)")
                 moteur = {"openvino": " · OpenVINO", "onnx": " · ONNX"}.get(d.pipeline.moteur, "")
                 self.sous_titre.setText(f"{statut} · {res}{fps:.0f} img/s · {analyse}{moteur}")
@@ -835,6 +849,14 @@ class PageCameras(QWidget):
         self.barre.currentChanged.connect(self._onglet_change)
         self.barre.tabMoved.connect(lambda *_: self.sauver())
         haut.addWidget(self.barre, 1)
+        self.p_detection = Pastille("Détection", "succes")
+        self.p_detection.point_colore = False
+        self.p_detection.setToolTip("Détection sur toutes les caméras. Désactivée : les images restent affichées, "
+                                    "sans analyse ni alerte. Aussi pilotable depuis FluxLite.")
+        self.p_detection.regler(bool(self.cfg.get("detection.actif")))
+        self.p_detection.toggled.connect(lambda etat: self.cfg.set("detection.actif", bool(etat)))
+        haut.addWidget(self.p_detection)
+        haut.addSpacing(6)
         self.b_ajouter = Bouton("Ajouter", "primaire", "plus")
         menu = QMenu(self)
         menu.addAction("Caméra, fichier ou lien…", self.nouvelle)

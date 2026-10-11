@@ -6,8 +6,10 @@
 """
 
 import os
+import queue
 import secrets
 import string
+import threading
 import time
 from datetime import datetime
 
@@ -23,6 +25,9 @@ from .config import RACINE
 from .theme import C, T, couleur
 from .widgets import Bouton, Interrupteur, etiquette
 
+TEXTE_PILOTAGE = ("Depuis FluxLite, ce compte pourra activer ou désactiver la détection (de ses caméras ou de "
+                  "tout le PC) et les notifications de Flux : mails, WhatsApp, Telegram, SMS… Réservé aux "
+                  "responsables de confiance. Chaque action est notée dans le journal.")
 DOSSIER = os.path.join(RACINE, "fluxlite")  # protégé : jamais remplacé par les mises à jour (clé du serveur)
 COULEURS_STATUT = {"attente": "attention", "actif": "succes", "suspendu": "danger"}
 
@@ -69,7 +74,8 @@ class FournisseurCameras(ms.FournisseurVide):
                 fps, res = d.fps, d.resolution
                 etat = "chargement" if (d.charge or d.derniere_image is None) else ("alerte" if personnes else "direct")
                 detecteurs[p.nom] = d
-            liste.append({"nom": p.nom, "etat": etat, "personnes": personnes, "fps": fps, "resolution": res})
+            liste.append({"nom": p.nom, "etat": etat, "personnes": personnes, "fps": fps, "resolution": res,
+                          "detection": bool(p.o.get("detection", True))})
         self._liste, self._detecteurs = liste, detecteurs  # remplacements atomiques
 
     def cameras(self):
@@ -82,6 +88,110 @@ class FournisseurCameras(ms.FournisseurVide):
         with d.lock:
             img, ann = d.derniere_image, d.annotations
         return img, ann
+
+
+# ---------------------------------------------------------------------------
+# Pilotage à distance : les demandes des téléphones sont exécutées dans le fil de l'interface
+# ---------------------------------------------------------------------------
+class Pilote(ms.PiloteVide):
+    def __init__(self, page):
+        self.page = page
+        self.file = queue.Queue()
+
+    def demander(self, action, **parametres):
+        """Appelée par un fil du serveur : attend que l'interface ait traité la demande (5 s au plus)."""
+        fini, resultat = threading.Event(), {}
+        self.file.put((action, parametres, fini, resultat))
+        if not fini.wait(5):
+            raise ms.ErreurServeur("Flux ne répond pas pour l'instant (fenêtre occupée). Réessayez.")
+        if "erreur" in resultat:
+            raise ms.ErreurServeur(resultat["erreur"])
+        return resultat["valeur"]
+
+    def traiter(self):
+        """Fil de l'interface, à chaque cycle."""
+        while True:
+            try:
+                action, prm, fini, resultat = self.file.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                if action == "regler":
+                    self._regler(**{k: prm[k] for k in ("cle", "valeur", "camera", "auteur")})
+                resultat["valeur"] = self.etat(prm.get("cameras") or [])
+            except ms.ErreurServeur as e:
+                resultat["erreur"] = str(e)
+            except Exception as e:  # noqa: BLE001
+                resultat["erreur"] = f"erreur interne ({e})"
+            fini.set()
+
+    def etat(self, autorisees):
+        cfg = self.page.cfg
+        pages = {p.nom: p for p in self.page.fen.page_cameras.pages}
+        cameras = [{"id": ms.id_camera(n), "nom": n, "detection": bool(pages[n].o.get("detection", True)),
+                    "en_marche": pages[n].en_cours()} for n in autorisees if n in pages]
+        canaux = [{"cle": cle, "nom": lib, "actif": bool(cfg.get(cle)),
+                   "configure": all(str(cfg.get(r) or "").strip() for r in requis)}
+                  for cle, lib, requis in ms.PILOTABLES]
+        from .config import NIVEAUX
+        try:
+            stats = self.page.fen.base.statistiques()
+        except Exception:  # noqa: BLE001
+            stats = {}
+        info = getattr(self.page.fen, "info_appareil", {}) or {}
+        return {"detection": bool(cfg.get("detection.actif")), "cameras": cameras, "canaux": canaux,
+                "niveau": cfg.get("detection.niveau"),
+                "niveaux": [{"cle": k, "nom": NIVEAUX[k]["nom"], "texte": NIVEAUX[k]["texte"]} for k in ms.NIVEAUX_PILOTABLES],
+                "delais": {"notif.delai": cfg.get("notif.delai"), "mail.delai": cfg.get("mail.delai")},
+                "statistiques": {"personnes": stats.get("personnes", 0), "actions_aujourdhui": stats.get("aujourdhui", 0)},
+                "calcul": info.get("nom", ""), "carte_nvidia": bool(info.get("cuda"))}
+
+    def _regler(self, cle, valeur, camera, auteur):
+        cfg, fen = self.page.cfg, self.page.fen
+        if cle in ms.COMMANDES_CAMERA:
+            page = fen.page_cameras.page_par_nom(camera)
+            if page is None:
+                raise ms.ErreurServeur("Caméra introuvable.")
+            if cle == "camera.detection":
+                page.regler_detection(valeur)
+                sujet = f"détection de « {camera} »"
+            elif cle == "camera.marche":
+                if valeur and not page.en_cours():
+                    page.demarrer()
+                elif not valeur and page.en_cours():
+                    page.arreter()
+                sujet = f"caméra « {camera} »"
+            else:  # camera.clip : vidéo enregistrée sur le PC (secondes d'avant comprises)
+                if not page.en_cours():
+                    raise ms.ErreurServeur("Démarrez d'abord la caméra.")
+                page._clip()
+                texte = f"Pilotage à distance — {auteur} a demandé une vidéo de « {camera} »."
+                fen.log_systeme(texte, "info", "FluxLite")
+                return
+        elif cle == "detection.niveau":
+            cfg.set(cle, valeur)
+            fen.page_cameras_niveaux()
+            from .config import NIVEAUX
+            texte = f"Pilotage à distance — {auteur} a choisi le niveau de scan {NIVEAUX[valeur]['nom']}."
+            fen.log_systeme(texte, "info", "FluxLite")
+            fen.toast(texte)
+            return
+        elif cle in ("notif.delai", "mail.delai"):
+            cfg.set(cle, valeur)
+            texte = (f"Pilotage à distance — {auteur} a réglé « {ms.LIBELLES_PILOTAGE[cle]} » sur {valeur:g} min.")
+            fen.log_systeme(texte, "info", "FluxLite")
+            fen.toast(texte)
+            return
+        else:
+            requis = next((r for c, _, r in ms.PILOTABLES if c == cle), ())
+            if valeur and not all(str(cfg.get(r) or "").strip() for r in requis):
+                raise ms.ErreurServeur(f"{ms.LIBELLES_PILOTAGE[cle]} : pas encore configuré sur le PC Flux.")
+            cfg.set(cle, valeur)
+            sujet = ms.LIBELLES_PILOTAGE[cle]
+        verbe = ("démarré" if valeur else "arrêté") if cle == "camera.marche" else ("activé" if valeur else "désactivé")
+        texte = f"Pilotage à distance — {auteur} a {verbe} : {sujet}."
+        fen.log_systeme(texte, "info", "FluxLite")
+        fen.toast(texte)
 
 
 # ---------------------------------------------------------------------------
@@ -144,11 +254,14 @@ class DialogueCompte(QDialog):
         for e in entreprises:
             self.entreprise.addItem(e["nom"], e["id"])
         self.mdp = QLineEdit(mot_de_passe_provisoire())
+        self.pilotage = QCheckBox("Autoriser le pilotage à distance")
+        self.pilotage.setToolTip(TEXTE_PILOTAGE)
         f.addRow("Prénom", self.prenom)
         f.addRow("Nom", self.nom)
         f.addRow("Mail", self.mail)
         f.addRow("Entreprise", self.entreprise)
         f.addRow("Mot de passe provisoire", self.mdp)
+        f.addRow("", self.pilotage)
         v.addLayout(f)
         v.addWidget(etiquette("Communiquez ce mot de passe à la personne : elle pourra le changer depuis l'onglet "
                               "Compte de FluxLite. Le compte est actif tout de suite."))
@@ -176,7 +289,7 @@ class DialogueCompte(QDialog):
             self.lbl.setText(ms.mot_de_passe_valide(mdp))
         else:
             self.resultat = (mail, mdp, self.nom.text().strip(), self.prenom.text().strip(),
-                             self.entreprise.currentData())
+                             self.entreprise.currentData(), self.pilotage.isChecked())
             self.accept()
 
 
@@ -213,6 +326,9 @@ class DialogueValidation(QDialog):
         self.nouvelle.setVisible(self.combo.currentData() == "nouvelle")
         v.addWidget(etiquette("Le compte verra seulement les caméras attribuées à cette entreprise (onglet "
                               "Entreprises)."))
+        self.pilotage = QCheckBox("Autoriser le pilotage à distance")
+        self.pilotage.setToolTip(TEXTE_PILOTAGE)
+        v.addWidget(self.pilotage)
         h = QHBoxLayout()
         h.addStretch(1)
         b0 = Bouton("Annuler")
@@ -234,6 +350,7 @@ class PageFluxLite(QWidget):
         self.serveur = None
         self.erreur_init = ""
         self.fournisseur = FournisseurCameras(fen.page_cameras)
+        self.pilote = Pilote(self)
         self._entreprise_courante = None
         self._maj_bloquee = False
         self._construire()
@@ -249,7 +366,7 @@ class PageFluxLite(QWidget):
             from .config import APP_VERSION
             from .sources import dessiner
             self.serveur = ms.ServeurFluxLite(DOSSIER, self.cfg, self.fournisseur, self._rappel, dessiner,
-                                              APP_VERSION)
+                                              APP_VERSION, self.pilote)
         except Exception as e:  # noqa: BLE001
             self.erreur_init = str(e)
             self.fen.log_systeme(f"FluxLite indisponible : {e}", "erreur")
@@ -309,6 +426,7 @@ class PageFluxLite(QWidget):
             self.serveur.evenement(e)
 
     def cycle(self):
+        self.pilote.traiter()
         if self.serveur is not None and self.serveur.en_marche():
             self.fournisseur.publier()
 
@@ -381,6 +499,11 @@ class PageFluxLite(QWidget):
         hb.addWidget(b)
         hb.addStretch(1)
         gv.addLayout(hb)
+        b = Bouton("Copier le lien pour Flux Remote", "fantome", "lien")
+        b.setToolTip("Adresse, port et clé en un seul lien : collez-le dans Flux Remote sur un autre ordinateur.")
+        b.clicked.connect(lambda: self.serveur and self._copier(
+            self.serveur.identite.lien_appairage(ms.adresses_locales(), self.cfg.get("fluxlite.port"), self.serveur.nom)))
+        gv.addWidget(b, 0, Qt.AlignmentFlag.AlignLeft)
         gv.addSpacing(6)
         s = QLabel("APPAIRER UN TÉLÉPHONE")
         s.setObjectName("section")
@@ -431,8 +554,9 @@ class PageFluxLite(QWidget):
         b.clicked.connect(self._nouveau_compte)
         h.addWidget(b)
         v.addLayout(h)
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(["Statut", "Prénom", "Nom", "Mail", "Entreprise", "Société indiquée",
+        self.table = QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels(["Statut", "Prénom", "Nom", "Mail", "Entreprise", "Pilotage",
+                                              "Société indiquée",
                                               "Dernière connexion", "Appareil"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -557,7 +681,8 @@ class PageFluxLite(QWidget):
         self.table.setRowCount(len(lignes))
         for i, c in enumerate(lignes):
             statut = ms.STATUTS.get(c["statut"], c["statut"]) + (" · en ligne" if c["id"] in actifs else "")
-            valeurs = [statut, c["prenom"], c["nom"], c["mail"], c["entreprise"] or "—", c["societe"] or "—",
+            valeurs = [statut, c["prenom"], c["nom"], c["mail"], c["entreprise"] or "—",
+                       "Autorisé" if c.get("pilotage") else "—", c["societe"] or "—",
                        date_courte(c["derniere_connexion"]),
                        " · ".join(x for x in (c.get("appareil"), c.get("version_app")) if x) or "—"]
             for j, val in enumerate(valeurs):
@@ -597,6 +722,11 @@ class PageFluxLite(QWidget):
             a.setChecked(e["id"] == c["entreprise_id"])
         sous.addSeparator()
         sous.addAction("Aucune", lambda: self._changer_entreprise(cid, None))
+        a = m.addAction("Autoriser le pilotage à distance",
+                        lambda: self._pilotage(c, not c.get("pilotage")))
+        a.setCheckable(True)
+        a.setChecked(bool(c.get("pilotage")))
+        a.setToolTip(TEXTE_PILOTAGE)
         if c["statut"] == "actif":
             m.addAction("Suspendre le compte", lambda: self._statut(cid, "suspendu"))
         elif c["statut"] == "suspendu":
@@ -621,7 +751,8 @@ class PageFluxLite(QWidget):
         try:
             if eid == "nouvelle":
                 eid = self.serveur.comptes.creer_entreprise(d.nouvelle.text())
-            self.serveur.comptes.modifier_compte(cid, statut="actif", entreprise_id=eid)
+            self.serveur.comptes.modifier_compte(cid, statut="actif", entreprise_id=eid,
+                                                 pilotage=int(d.pilotage.isChecked()))
         except ms.ErreurServeur as e:
             self.fen.toast(str(e), "erreur")
             return
@@ -633,6 +764,14 @@ class PageFluxLite(QWidget):
 
     def _changer_entreprise(self, cid, eid):
         self.serveur.comptes.modifier_compte(cid, entreprise_id=eid)
+        self.recharger()
+
+    def _pilotage(self, c, autoriser):
+        if autoriser and QMessageBox.question(
+                self, "Pilotage à distance", f"Autoriser {c['prenom']} {c['nom']} à piloter Flux ?\n\n{TEXTE_PILOTAGE}") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self.serveur.comptes.modifier_compte(c["id"], pilotage=int(autoriser))
         self.recharger()
 
     def _statut(self, cid, statut):
@@ -660,6 +799,7 @@ class PageFluxLite(QWidget):
         sessions = self.serveur.comptes.sessions(c["id"])
         texte = (f"{c['prenom']} {c['nom']} — {c['mail']}\nStatut : {ms.STATUTS.get(c['statut'])}\n"
                  f"Entreprise : {c['entreprise'] or 'aucune'} (société indiquée : {c['societe'] or '—'})\n"
+                 f"Pilotage à distance : {'autorisé' if c.get('pilotage') else 'non'}\n"
                  f"Créé le : {date_courte(c['cree_le'])}\n"
                  f"Conditions d'utilisation acceptées : version {c['cgu_version'] or '—'} le {date_courte(c['cgu_le'])}\n"
                  f"Dernière connexion : {date_courte(c['derniere_connexion'])} depuis {c['derniere_ip'] or '—'}\n"
@@ -683,9 +823,9 @@ class PageFluxLite(QWidget):
         d = DialogueCompte(self, self.serveur.comptes.entreprises())
         if d.exec() != QDialog.DialogCode.Accepted or not d.resultat:
             return
-        mail, mdp, nom, prenom, eid = d.resultat
+        mail, mdp, nom, prenom, eid, pilotage = d.resultat
         try:
-            self.serveur.comptes.creer_compte(mail, mdp, nom, prenom, "", "actif", eid)
+            self.serveur.comptes.creer_compte(mail, mdp, nom, prenom, "", "actif", eid, pilotage=pilotage)
         except ms.ErreurServeur as e:
             self.fen.toast(str(e), "erreur")
             return

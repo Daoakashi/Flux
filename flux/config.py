@@ -128,6 +128,10 @@ SCHEMA = [
     R("apparence.opacite", "apparence", "Opacité de la fenêtre", "int", 100, "", None, 70, 100, 1, " %", True),
 
     # --- Détection ---------------------------------------------------------------------
+    R("detection.actif", "detection", "Détection active", "bool", True,
+      "Désactivée : les caméras restent affichées (et visibles sur FluxLite) mais rien n'est analysé : aucune "
+      "alerte, aucun mail, aucune notification. Chaque caméra a aussi son propre interrupteur « Détection ». "
+      "Pilotable à distance depuis FluxLite."),
     R("detection.niveau", "detection", "Niveau de scan", "choix", "equilibre",
       "Modèle et méthode d'analyse. Chaque caméra peut aussi choisir son propre niveau.",
       [("rapide", "Rapide"), ("equilibre", "Équilibré"), ("precis", "Précis"), ("maximum", "Maximum"),

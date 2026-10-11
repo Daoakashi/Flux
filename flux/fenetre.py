@@ -614,6 +614,11 @@ class FenetrePrincipale(QMainWindow):
             self.appliquer_identite()
         if cle.startswith("fluxlite."):
             self.page_mobile.reglage_change(cle)
+        if cle == "detection.actif":
+            self.page_cameras.p_detection.regler(bool(valeur))
+            self.toast("Détection activée sur toutes les caméras." if valeur else
+                       "Détection désactivée : les caméras restent affichées, sans alerte.", "ok" if valeur else "info")
+            self._maj_barre_etat()
 
     def appliquer_identite(self):
         """Nom, titre, version et logo (personnalisables en mode développeur)."""
@@ -774,7 +779,12 @@ class FenetrePrincipale(QMainWindow):
             self.st_appareil.setText(f"Calcul : {nom} · {moteur}" + ("" if i.get("cuda") or i.get("mps") else
                                                                     " (pas de carte NVIDIA)"))
         _, _, _, lib = niveau_effectif(self.cfg.get("detection.niveau"), self.cfg)
-        self.st_niveau.setText(f"Niveau : {lib}")
+        if self.cfg.get("detection.actif"):
+            self.st_niveau.setText(f"Niveau : {lib}")
+            self.st_niveau.setStyleSheet("")
+        else:
+            self.st_niveau.setText("Détection désactivée")
+            self.st_niveau.setStyleSheet(f"color: {C['attention']}; font-weight: 600;")
         actives = sum(1 for p in self.page_cameras.pages if p.en_cours())
         self.st_cameras.setText(f"{actives}/{len(self.page_cameras.pages)} caméra(s) active(s)")
         s = self.base.statistiques()
