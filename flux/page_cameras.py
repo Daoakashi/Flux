@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import unquote, urlparse
 
 import cv2
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QListWidget,
@@ -16,7 +17,8 @@ from .config import NIVEAUX, niveau_effectif
 from .sources import Detecteur, dessiner, est_lien_web, slug
 from .page_groupes import DialogueGroupe, PageGroupe  # noqa: F401
 from .taches import en_arriere_plan
-from .widgets import (Bouton, BoutonX, Interrupteur, Pastille, Repliable, VueVideo, Voyant, etiquette, ligne_option,
+from .vision import copie_zone, point_dans_zone, zones_options
+from .widgets import (Bouton, BoutonX, Interrupteur, OutilsZone, Pastille, Repliable, VueVideo, Voyant, etiquette, ligne_option,
                       separateur)
 
 CHOIX_NIVEAUX = [("global", "Réglage global")] + [(k, v["nom"]) for k, v in NIVEAUX.items()] + [
@@ -36,19 +38,28 @@ def texte_niveau(cle, cfg):
     return f"{prefixe}{n['nom']} — {n['texte']}"
 
 
-def decouper_zone(img, ann, rect):
-    """Recadre l'image sur une zone (coordonnées 0-1) et ramène les détections dans ce repère."""
+def decouper_zone(img, ann, zone):
+    """Recadre l'image sur une zone (coordonnées 0-1) et ramène les détections dans ce repère.
+    zone : dict {"rect"[, "points"]} ou simple rectangle (x1, y1, x2, y2). Pour une forme libre, l'image est
+    recadrée sur le rectangle qui l'entoure et l'extérieur de la forme est assombri."""
+    if not isinstance(zone, dict):
+        zone = {"rect": tuple(zone)}
+    rect = zone["rect"]
     h, w = img.shape[:2]
     x0, y0 = int(rect[0] * w), int(rect[1] * h)
     x1, y1 = max(int(rect[2] * w), x0 + 2), max(int(rect[3] * h), y0 + 2)
     crop = img[y0:y1, x0:x1]
+    if zone.get("points") and crop.size:
+        masque = np.zeros(crop.shape[:2], np.uint8)
+        cv2.fillPoly(masque, [np.array([[x * w - x0, y * h - y0] for x, y in zone["points"]], np.int32)], 255)
+        sombre = (crop * 0.35).astype(crop.dtype)  # copie : l'image d'origine (partagée) n'est pas modifiée
+        crop = np.where(masque[..., None] > 0, crop, sombre)
     if not ann:
         return crop, ann
     cw, ch = x1 - x0, y1 - y0
 
     def dedans(b):
-        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
-        return x0 <= cx <= x1 and y0 <= cy <= y1
+        return point_dans_zone((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, zone)
 
     def decaler(b):
         return [b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0]
@@ -77,8 +88,7 @@ class PageFlux(QWidget):
         self.voyant_onglet = Voyant(10)
         self.onvif = dict(p["onvif"]) if p.get("onvif") else None
         self._client_onvif = None
-        from .vision import zones_options
-        zones = [{"nom": z["nom"], "rect": list(z["rect"])} for z in zones_options(p)]
+        zones = [copie_zone(z) for z in zones_options(p)]
         self.o = {"niveau": p.get("niveau", "global"), "detection": bool(p.get("detection", True)),
                   "visages": bool(p.get("visages", False)),
                   "expressions": bool(p.get("expressions", False)), "plaques": bool(p.get("plaques", False)),
@@ -133,6 +143,7 @@ class PageFlux(QWidget):
         self.video.message_vide = "Flux arrêté"
         self.video.definir_zones(self.o["zones"])
         self.video.zonesChangees.connect(self._zones_changees)
+        self.video.zoneSelectionnee.connect(self._zone_choisie_sur_image)
         gauche.addWidget(self.video, 1)
         racine.addLayout(gauche, 1)
 
@@ -212,13 +223,17 @@ class PageFlux(QWidget):
         col.addSpacing(4)
         col.addWidget(separateur())
         col.addWidget(etiquette("ZONES", "section"))
-        col.addWidget(etiquette("Dessinez un ou plusieurs rectangles sur l'image : la détection se limite aux zones, "
+        col.addWidget(etiquette("Dessinez une ou plusieurs zones sur l'image : la détection se limite aux zones, "
                                 "chaque entrée et sortie est notée avec le nom de la zone, et chaque zone peut "
-                                "s'afficher seule, agrandie, dans un groupe de caméras. Clic droit sur une zone pour "
-                                "la renommer ou la supprimer."))
+                                "s'afficher seule, agrandie, dans un groupe de caméras."))
+        col.addWidget(OutilsZone(self.video))
+        col.addWidget(etiquette("Cliquez sur une zone pour afficher ses points. Tirez un point pour déformer, le « + » "
+                                "d'un côté (ou un double-clic) pour ajouter un point, Suppr pour le retirer. "
+                                "Maj + glisser déplace la zone. Clic droit : renommer, supprimer, autres options."))
         self.liste_zones = QListWidget()
         self.liste_zones.setMaximumHeight(110)
         self.liste_zones.itemDoubleClicked.connect(lambda _it: self._renommer_zone())
+        self.liste_zones.currentRowChanged.connect(self._zone_choisie_dans_liste)
         col.addWidget(self.liste_zones)
         h_z = QHBoxLayout()
         b_zr = Bouton("Renommer", "discret")
@@ -328,17 +343,31 @@ class PageFlux(QWidget):
 
     # --- zones ------------------------------------------------------------------------------
     def _remplir_zones(self):
+        self.liste_zones.blockSignals(True)
         self.liste_zones.clear()
         for z in self.o["zones"]:
             x1, y1, x2, y2 = z["rect"]
-            self.liste_zones.addItem(f"{z['nom']}   ·   {round((x2 - x1) * 100)} × {round((y2 - y1) * 100)} %")
+            forme = f"forme à {len(z['points'])} points" if z.get("points") else "rectangle"
+            self.liste_zones.addItem(f"{z['nom']}   ·   {forme}, {round((x2 - x1) * 100)} × {round((y2 - y1) * 100)} %")
         if not self.o["zones"]:
             self.liste_zones.addItem("Aucune zone : toute l'image est analysée")
+        sel = self.video._sel
+        if sel is not None and sel < len(self.o["zones"]):
+            self.liste_zones.setCurrentRow(sel)
+        self.liste_zones.blockSignals(False)
+
+    def _zone_choisie_sur_image(self, i):
+        self.liste_zones.blockSignals(True)
+        self.liste_zones.setCurrentRow(i if 0 <= i < len(self.o["zones"]) else -1)
+        self.liste_zones.blockSignals(False)
+
+    def _zone_choisie_dans_liste(self, i):
+        self.video.selectionner_zone(i if 0 <= i < len(self.o["zones"]) else -1)
 
     def _zones_changees(self, zones):
         """Appelée par la vue vidéo (dessin, renommage, suppression au clic droit)."""
         anciennes = self.o["zones"]
-        self.o["zones"] = [{"nom": z["nom"], "rect": list(z["rect"])} for z in zones]
+        self.o["zones"] = [copie_zone(z) for z in zones]
         self._remplir_zones()
         self.page.zones_modifiees(self, anciennes, self.o["zones"])
         self.page.sauver()
@@ -372,6 +401,9 @@ class PageFlux(QWidget):
 
     def rect_zone(self, nom):
         return next((tuple(z["rect"]) for z in self.o["zones"] if z["nom"] == nom), None)
+
+    def zone_par_nom(self, nom):
+        return next((z for z in self.o["zones"] if z["nom"] == nom), None)
 
     # --- source, nom et ONVIF (modifiables pendant le flux) ---------------------------------
     def _source_validee(self):
@@ -500,7 +532,8 @@ class PageFlux(QWidget):
         zone = nom d'une zone : la vignette montre seulement cette partie de l'image, agrandie."""
         d = self.detecteur
         titre = titre or self.nom
-        rect = self.rect_zone(zone) if zone else None
+        zone_d = self.zone_par_nom(zone) if zone else None
+        rect = tuple(zone_d["rect"]) if zone_d else None
         if zone and rect is None:
             if vue._image is not None:
                 vue.effacer()
@@ -516,8 +549,8 @@ class PageFlux(QWidget):
         actif = self.en_cours()
         with d.lock:
             img, ann, fps, heure = d.derniere_image, d.annotations, d.fps, d.heure_image
-        if rect is not None and img is not None:
-            img, ann = decouper_zone(img, ann, rect)
+        if zone_d is not None and img is not None:
+            img, ann = decouper_zone(img, ann, zone_d)
         nb_p = len((ann or {}).get("personnes", []))
         if not actif:
             etat, statut = "arret", d.statut
@@ -953,7 +986,7 @@ class PageCameras(QWidget):
         renommees = {}
         if len(anciennes) == len(nouvelles):
             for a, n in zip(anciennes, nouvelles):
-                if a["nom"] != n["nom"] and list(a["rect"]) == list(n["rect"]):
+                if a["nom"] != n["nom"] and list(a["rect"]) == list(n["rect"]) and a.get("points") == n.get("points"):
                     renommees[a["nom"]] = n["nom"]
         for g in self.groupes:
             for a, n in renommees.items():

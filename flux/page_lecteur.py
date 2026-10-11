@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel, QLin
 from .page_cameras import CHOIX_NIVEAUX, texte_niveau
 from .sources import Analyseur, est_lien_web, resoudre_lien
 from .taches import Tache
-from .widgets import Bouton, Interrupteur, Pastille, VueVideo, etiquette
+from .widgets import Bouton, Interrupteur, OutilsZone, Pastille, VueVideo, etiquette
 
 try:
     from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
@@ -204,7 +204,9 @@ class PageLecteur(QWidget):
         self.lbl_niveau = etiquette(texte_niveau("global", self.cfg))
         col.addWidget(self.lbl_niveau)
         col.addWidget(etiquette("Les personnes vues dans la vidéo sont reconnues et enregistrées dans la base comme "
-                                "pour une caméra. Dessinez une zone sur l'image pour limiter l'analyse."))
+                                "pour une caméra. Dessinez une zone sur l'image pour limiter l'analyse : rectangle, "
+                                "carré déformable ou lasso. Clic droit sur une zone pour les autres options."))
+        col.addWidget(OutilsZone(self.video))
         col.addStretch(1)
         self.lbl_analyse = etiquette("", "soustitre")
         col.addWidget(self.lbl_analyse)

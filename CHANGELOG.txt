@@ -5,6 +5,17 @@ Beta Version 0.9.1 alpha
   - Nouvelles commandes à distance (comptes autorisés) : démarrer ou arrêter une caméra, enregistrer
     une vidéo sur le PC, changer le niveau de scan, régler le délai entre deux notifications et entre
     deux mails. Chaque commande est notée dans le journal.
+  - Zones de détection en forme libre, avec trois outils (page Caméras et Lecteur) :
+    - Rectangle : comme avant ; les coins redimensionnent la zone ;
+    - Déformable : un carré dont chaque point se déplace librement ;
+    - Lasso : le contour se dessine à main levée.
+    Cliquez sur une zone pour afficher ses points. Le « + » au milieu d'un côté (ou un double-clic sur
+    le côté) ajoute un point, Suppr ou clic droit le retire, Maj + glisser déplace la zone. Un
+    rectangle peut devenir déformable (et inversement) par clic droit.
+  - La détection, les entrées et sorties de zone et les vignettes de zone des groupes suivent la
+    forme exacte de la zone. Les photos d'alerte dessinent son contour.
+* À savoir pour la mise à jour
+  - Les zones rectangulaires déjà dessinées sont gardées telles quelles.
 
 Beta Version 0.9.0 alpha
 + Ajouts

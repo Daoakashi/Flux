@@ -7,12 +7,12 @@ import cv2
 import numpy as np
 from PySide6.QtCore import (QEasingCurve, QParallelAnimationGroup, QPoint, QPointF, QPropertyAnimation, QRectF, QSize,
                             Qt, QTimer, QVariantAnimation, Signal, Property)
-from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QAbstractButton, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
+from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
                                QSizePolicy, QVBoxLayout, QWidget)
 
 from .theme import C, T, couleur, dessiner_icone, dessiner_logo, melange, police
-from .vision import NOMS_VEHICULES, iou
+from .vision import NOMS_VEHICULES, boite_points, contour_zone, copie_zone, iou, normaliser_zone, point_dans_zone
 
 
 def _anim(parent, rappel, courbe=QEasingCurve.Type.OutCubic):
@@ -542,8 +542,11 @@ class Logo(QWidget):
 # ---------------------------------------------------------------------------
 class VueVideo(QWidget):
     zoneChangee = Signal(object)     # ancienne API (une seule zone) : première zone ou None
-    zonesChangees = Signal(object)   # liste de zones {"nom", "rect": (x1, y1, x2, y2) normalisés}
+    zonesChangees = Signal(object)   # liste de zones {"nom", "rect": (x1, y1, x2, y2)[, "points"]} normalisés
+    zoneSelectionnee = Signal(int)   # zone choisie sur l'image (-1 : aucune)
+    outilChange = Signal(str)
     doubleClique = Signal()
+    OUTILS = (("rect", "Rectangle"), ("forme", "Déformable"), ("lasso", "Lasso"))
     CATEGORIES = (("vehicules", "o_vehicule"), ("personnes", "o_personne"), ("visages", "o_visage"),
                   ("plaques", "o_plaque"))
 
@@ -560,8 +563,14 @@ class VueVideo(QWidget):
         self._taille = (1, 1)
         self._boites = {c: [] for c, _ in self.CATEGORIES}
         self._zones = []
-        self._trace = None  # rectangle en cours de dessin
-        self._glisse = None
+        self._action = None   # geste en cours : tracé (rectangle, forme, lasso), point déplacé, zone déplacée
+        self._sel = None      # zone sélectionnée : ses poignées sont affichées
+        self._survol = None   # poignée sous la souris
+        self.outil = "rect"
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        if zone_active:
+            self.setMouseTracking(True)
+            self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._etat, self._statut, self._compteurs, self._fps = "arret", "Aucun flux", [], 0.0
         self._badges = []
         self._geom = (0.0, 0.0, 1.0)
@@ -571,9 +580,6 @@ class VueVideo(QWidget):
         self._timer.setInterval(66 if compact else 33)
         self._timer.timeout.connect(self.update)
         self._timer.start()
-
-    def mouseDoubleClickEvent(self, e):
-        self.doubleClique.emit()
 
     # --- données ---------------------------------------------------------------
     def definir_image(self, frame, ann=None, heure=0.0):
@@ -621,11 +627,13 @@ class VueVideo(QWidget):
         self.definir_zones([{"nom": "Zone 1", "rect": tuple(zone)}] if zone else [])
 
     def definir_zones(self, zones):
-        self._zones = [{"nom": str(z.get("nom") or f"Zone {i + 1}"), "rect": tuple(z["rect"])}
-                       for i, z in enumerate(zones or []) if z and z.get("rect")]
+        self._zones = [n for n in (normaliser_zone(z, i) for i, z in enumerate(zones or [])) if n]
+        self._action = self._survol = None
+        if self._sel is not None and self._sel >= len(self._zones):
+            self._sel = None
 
     def zones(self):
-        return [dict(z, rect=list(z["rect"])) for z in self._zones]
+        return [copie_zone(z) for z in self._zones]
 
     def _emettre_zones(self):
         self.zonesChangees.emit(self.zones())
@@ -676,66 +684,339 @@ class VueVideo(QWidget):
                     e["mort"] = t
             existantes.extend(ajoutees)
 
-    # --- zone d'intérêt -------------------------------------------------------------
+    # --- zones : outils de dessin et d'édition ------------------------------------------------
+    # Rectangle : glisser pour tracer. Les coins redimensionnent ; les poignées du milieu des côtés ajoutent un
+    # point, et le rectangle devient une forme libre.
+    # Déformable : glisser pour tracer un carré à 4 points, puis déplacer chaque point librement ; tirer une
+    # poignée de milieu (ou double-cliquer sur un côté) ajoute un point.
+    # Lasso : dessiner le contour à main levée ; il est simplifié en forme libre au relâchement.
+    # Partout : clic sur une zone pour la sélectionner, Maj + glisser pour la déplacer, clic droit pour le menu,
+    # Suppr pour retirer le point survolé (ou la zone sélectionnée), Échap pour annuler.
+    def regler_outil(self, outil):
+        if outil in dict(self.OUTILS) and outil != self.outil:
+            self.outil = outil
+            self._action = None
+            self.outilChange.emit(outil)
+
+    def selectionner_zone(self, i):
+        """Sélection venant de l'extérieur (liste des zones) : sans renvoyer le signal."""
+        self._selectionner(i if i is not None and i >= 0 else None, emettre=False)
+
+    def _selectionner(self, i, emettre=True):
+        i = i if i is not None and 0 <= i < len(self._zones) else None
+        if i != self._sel:
+            self._sel = i
+            if emettre:
+                self.zoneSelectionnee.emit(-1 if i is None else i)
+
     def _vers_norm(self, pos):
         ox, oy, s = self._geom
         iw, ih = self._taille
         return (min(max((pos.x() - ox) / s / iw, 0.0), 1.0), min(max((pos.y() - oy) / s / ih, 0.0), 1.0))
 
+    def _vers_ecran(self, x, y):
+        ox, oy, s = self._geom
+        iw, ih = self._taille
+        return QPointF(ox + x * iw * s, oy + y * ih * s)
+
     def _zone_sous(self, pos):
         x, y = self._vers_norm(pos)
+        if self._sel is not None and point_dans_zone(x, y, self._zones[self._sel]):
+            return self._sel  # la zone sélectionnée passe devant les autres
         for i in range(len(self._zones) - 1, -1, -1):
-            x1, y1, x2, y2 = self._zones[i]["rect"]
-            if x1 <= x <= x2 and y1 <= y <= y2:
+            if point_dans_zone(x, y, self._zones[i]):
                 return i
         return None
+
+    def _fixer_points(self, i, pts):
+        z = self._zones[i]
+        z["points"] = [tuple(p) for p in pts]
+        z["rect"] = boite_points(z["points"])
+
+    def _poignees(self, i):
+        """Poignées de la zone i : [(type, k, point écran)]. type : « sommet » (forme libre), « coin » (rectangle)
+        ou « milieu » (ajoute un point au milieu du côté k ; masquée sur les côtés trop courts)."""
+        z = self._zones[i]
+        pts = contour_zone(z)
+        typ = "sommet" if z.get("points") else "coin"
+        ecran = [self._vers_ecran(*p) for p in pts]
+        sortie = [(typ, k, q) for k, q in enumerate(ecran)]
+        for k, q in enumerate(ecran):
+            r = ecran[(k + 1) % len(ecran)]
+            if math.hypot(r.x() - q.x(), r.y() - q.y()) >= 30:
+                sortie.append(("milieu", k, QPointF((q.x() + r.x()) / 2, (q.y() + r.y()) / 2)))
+        return sortie
+
+    def _poignee_sous(self, pos):
+        if not self.zone_active or self._sel is None or self._sel >= len(self._zones):
+            return None
+        poignees = self._poignees(self._sel)
+        for cherche, rayon in ((("sommet", "coin"), 9.0), (("milieu",), 7.0)):
+            proches = [(math.hypot(q.x() - pos.x(), q.y() - pos.y()), typ, k) for typ, k, q in poignees
+                       if typ in cherche]
+            proches = [c for c in proches if c[0] <= rayon]
+            if proches:
+                _, typ, k = min(proches)
+                return typ, k
+        return None
+
+    def _arete_sous(self, pos, rayon=7.0):
+        """Côté de la zone sélectionnée sous la souris (index du premier point), ou None."""
+        if self._sel is None or self._sel >= len(self._zones):
+            return None
+        ecran = [self._vers_ecran(*p) for p in contour_zone(self._zones[self._sel])]
+        meilleur = None
+        for k, a in enumerate(ecran):
+            b = ecran[(k + 1) % len(ecran)]
+            dx, dy = b.x() - a.x(), b.y() - a.y()
+            t = max(0.0, min(1.0, ((pos.x() - a.x()) * dx + (pos.y() - a.y()) * dy) / ((dx * dx + dy * dy) or 1e-9)))
+            d = math.hypot(a.x() + t * dx - pos.x(), a.y() + t * dy - pos.y())
+            if d <= rayon and (meilleur is None or d < meilleur[0]):
+                meilleur = (d, k)
+        return meilleur[1] if meilleur else None
+
+    def _copie(self, z):
+        c = dict(z)
+        if z.get("points"):
+            c["points"] = list(z["points"])
+        return c
 
     def mousePressEvent(self, e):
         if self._image is None or not self.zone_active:
             return
+        pos = e.position()
         if e.button() == Qt.MouseButton.RightButton:
+            self._annuler_geste()
             self._menu_zones(e)
-        elif e.button() == Qt.MouseButton.LeftButton:
-            self._glisse = self._vers_norm(e.position())
+            return
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        poignee = self._poignee_sous(pos)
+        if poignee:
+            typ, k = poignee
+            i = self._sel
+            orig = self._copie(self._zones[i])
+            if typ == "milieu":  # ajoute un point au milieu du côté, puis le fait suivre la souris
+                pts = contour_zone(self._zones[i])
+                a, b = pts[k], pts[(k + 1) % len(pts)]
+                pts.insert(k + 1, ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+                self._fixer_points(i, pts)
+                typ, k = "sommet", k + 1
+            action = {"type": typ, "i": i, "k": k, "orig": orig}
+            if typ == "coin":
+                action["fixe"] = contour_zone(orig)[(k + 2) % 4]  # le coin opposé ne bouge pas
+            self._action = action
+            return
+        n = self._vers_norm(pos)
+        i = self._zone_sous(pos)
+        if e.modifiers() & Qt.KeyboardModifier.ShiftModifier and i is not None:
+            self._selectionner(i)
+            self._action = {"type": "deplacer", "i": i, "depart": n, "orig": self._copie(self._zones[i])}
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+        self._action = {"type": self.outil, "depart": n, "pos0": QPointF(pos), "sous": i, "pts": [n], "boite": None,
+                        "loin": 0.0}
+
+    def mouseMoveEvent(self, e):
+        pos = e.position()
+        a = self._action
+        if a is None:
+            self._maj_curseur(pos, e.modifiers())
+            return
+        n = self._vers_norm(pos)
+        t = a["type"]
+        if "pos0" in a:  # plus grande distance au point de départ (un lasso fermé revient à son départ)
+            a["loin"] = max(a["loin"], math.hypot(pos.x() - a["pos0"].x(), pos.y() - a["pos0"].y()))
+        if t == "sommet":
+            pts = list(self._zones[a["i"]]["points"])
+            pts[a["k"]] = n
+            self._fixer_points(a["i"], pts)
+        elif t == "coin":
+            fx, fy = a["fixe"]
+            self._zones[a["i"]]["rect"] = (min(fx, n[0]), min(fy, n[1]), max(fx, n[0]), max(fy, n[1]))
+        elif t == "deplacer":
+            o = a["orig"]
+            x1, y1, x2, y2 = o["rect"]
+            dx = min(max(n[0] - a["depart"][0], -x1), 1 - x2)  # la zone reste dans l'image
+            dy = min(max(n[1] - a["depart"][1], -y1), 1 - y2)
+            z = self._zones[a["i"]]
+            z["rect"] = (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
+            if o.get("points"):
+                z["points"] = [(x + dx, y + dy) for x, y in o["points"]]
+        elif t == "lasso":
+            d = self._vers_ecran(*a["pts"][-1])
+            if math.hypot(pos.x() - d.x(), pos.y() - d.y()) >= 3:
+                a["pts"].append(n)
+        else:  # rectangle ou carré déformable
+            x1, y1 = a["depart"]
+            a["boite"] = (min(x1, n[0]), min(y1, n[1]), max(x1, n[0]), max(y1, n[1]))
+
+    def mouseReleaseEvent(self, e):
+        a, self._action = self._action, None
+        if a is None:
+            return
+        t = a["type"]
+        if t in ("sommet", "coin", "deplacer"):
+            x1, y1, x2, y2 = self._zones[a["i"]]["rect"]
+            if x2 - x1 < 0.01 or y2 - y1 < 0.01:  # forme écrasée : retour à l'état d'avant
+                self._zones[a["i"]] = a["orig"]
+            if self._zones[a["i"]] != a["orig"]:
+                self._emettre_zones()
+            self._maj_curseur(e.position(), e.modifiers())
+            return
+        if max(a["loin"], math.hypot(e.position().x() - a["pos0"].x(), e.position().y() - a["pos0"].y())) < 5:
+            self._selectionner(a["sous"])  # simple clic : choisit la zone (ou aucune)
+            return
+        if t == "lasso":
+            zone = self._zone_lasso(a["pts"])
+        else:
+            b, zone = a["boite"], None
+            if b and b[2] - b[0] >= 0.02 and b[3] - b[1] >= 0.02:
+                zone = {"rect": b} if t == "rect" else {"rect": b, "points": contour_zone({"rect": b})}
+        if zone is None:
+            return
+        zone["nom"] = self._nom_libre()
+        self._zones.append(zone)
+        self._selectionner(len(self._zones) - 1)
+        self._emettre_zones()
+
+    def _zone_lasso(self, pts):
+        """Contour à main levée -> forme libre simplifiée (au plus 80 points), ou None si trop petite."""
+        if len(pts) < 3:
+            return None
+        _, _, s = self._geom
+        iw, ih = self._taille
+        lx, ly = iw * s, ih * s
+        ecran = np.array([[x * lx, y * ly] for x, y in pts], np.float32).reshape(-1, 1, 2)
+        eps = 1.5
+        approx = cv2.approxPolyDP(ecran, eps, True)
+        while len(approx) > 80:
+            eps *= 1.5
+            approx = cv2.approxPolyDP(ecran, eps, True)
+        forme = [(min(max(float(q[0][0]) / lx, 0.0), 1.0), min(max(float(q[0][1]) / ly, 0.0), 1.0)) for q in approx]
+        if len(forme) < 3:
+            return None
+        b = boite_points(forme)
+        if b[2] - b[0] < 0.02 or b[3] - b[1] < 0.02 or abs(cv2.contourArea(np.array(forme, np.float32))) < 0.0004:
+            return None
+        return {"rect": b, "points": forme}
+
+    def mouseDoubleClickEvent(self, e):
+        if self.zone_active and self._image is not None and e.button() == Qt.MouseButton.LeftButton:
+            k = self._arete_sous(e.position())
+            if k is not None:  # double-clic sur un côté de la zone sélectionnée : nouveau point
+                self._action = None
+                pts = contour_zone(self._zones[self._sel])
+                pts.insert(k + 1, self._vers_norm(e.position()))
+                self._fixer_points(self._sel, pts)
+                self._emettre_zones()
+                return
+        self.doubleClique.emit()
+
+    def keyPressEvent(self, e):
+        if not self.zone_active:
+            return super().keyPressEvent(e)
+        if e.key() == Qt.Key.Key_Escape:
+            if self._action is not None:
+                self._annuler_geste()
+            else:
+                self._selectionner(None)
+        elif e.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self._action is None:
+            poignee = self._survol
+            if poignee and poignee[0] == "sommet" and self._sel is not None:
+                self._supprimer_point(self._sel, poignee[1])
+            elif self._sel is not None:
+                self._supprimer_zone(self._sel)
+        else:
+            super().keyPressEvent(e)
+
+    def leaveEvent(self, e):
+        self._survol = None
+        super().leaveEvent(e)
+
+    def _annuler_geste(self):
+        a, self._action = self._action, None
+        if a and "orig" in a and a.get("i") is not None and a["i"] < len(self._zones):
+            self._zones[a["i"]] = a["orig"]
+
+    def _maj_curseur(self, pos, mods):
+        if not self.zone_active or self._image is None:
+            return
+        poignee = self._poignee_sous(pos)
+        if poignee:
+            forme = Qt.CursorShape.PointingHandCursor if poignee[0] == "milieu" else Qt.CursorShape.SizeAllCursor
+        elif mods & Qt.KeyboardModifier.ShiftModifier and self._zone_sous(pos) is not None:
+            forme = Qt.CursorShape.OpenHandCursor
+        else:
+            forme = Qt.CursorShape.CrossCursor
+        self._survol = poignee
+        if self.cursor().shape() != forme:
+            self.setCursor(forme)
+
+    def _supprimer_point(self, i, k):
+        pts = contour_zone(self._zones[i])
+        if len(pts) > 3:
+            del pts[k]
+            self._fixer_points(i, pts)
+            self._survol = None
+            self._emettre_zones()
+
+    def _supprimer_zone(self, i):
+        del self._zones[i]
+        self._sel = None
+        self.zoneSelectionnee.emit(-1)
+        self._emettre_zones()
+
+    def _en_forme(self, i):
+        self._fixer_points(i, contour_zone(self._zones[i]))
+        self._selectionner(i)
+        self._emettre_zones()
+
+    def _en_rectangle(self, i):
+        self._zones[i].pop("points", None)
+        self._emettre_zones()
 
     def _menu_zones(self, e):
         from PySide6.QtWidgets import QInputDialog, QMenu
-        i = self._zone_sous(e.position())
-        m = QMenu(self)
+        pos = e.position()
+        poignee = self._poignee_sous(pos)
+        i = self._sel if poignee else self._zone_sous(pos)
         if i is not None:
-            nom = self._zones[i]["nom"]
+            self._selectionner(i)
+        m = QMenu(self)
+        if poignee and poignee[0] == "sommet" and len(self._zones[i]["points"]) > 3:
+            m.addAction("Supprimer ce point", lambda k=poignee[1]: self._supprimer_point(i, k))
+            m.addSeparator()
+        if i is not None:
+            z = self._zones[i]
+            nom = z["nom"]
 
             def renommer():
                 nouveau, ok = QInputDialog.getText(self, "Renommer la zone", "Nom de la zone :", text=nom)
                 if ok and nouveau.strip():
                     self._zones[i]["nom"] = nouveau.strip()
                     self._emettre_zones()
-
-            def supprimer():
-                del self._zones[i]
-                self._emettre_zones()
             m.addAction(f"Renommer « {nom} »…", renommer)
-            m.addAction(f"Supprimer « {nom} »", supprimer)
+            if z.get("points"):
+                m.addAction("Revenir à un rectangle", lambda: self._en_rectangle(i))
+            else:
+                m.addAction("Rendre déformable (points libres)", lambda: self._en_forme(i))
+            m.addAction(f"Supprimer « {nom} »", lambda: self._supprimer_zone(i))
         if self._zones:
             m.addSeparator()
-            m.addAction("Effacer toutes les zones", lambda: (self._zones.clear(), self._emettre_zones()))
-        if not m.isEmpty():
-            m.exec(e.globalPosition().toPoint())
 
-    def mouseMoveEvent(self, e):
-        if self._glisse is not None:
-            x1, y1 = self._glisse
-            x2, y2 = self._vers_norm(e.position())
-            self._trace = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-
-    def mouseReleaseEvent(self, e):
-        if self._glisse is None:
-            return
-        self._glisse = None
-        z, self._trace = self._trace, None
-        if z is not None and z[2] - z[0] >= 0.02 and z[3] - z[1] >= 0.02:
-            self._zones.append({"nom": self._nom_libre(), "rect": z})
-            self._emettre_zones()
+            def tout_effacer():
+                self._zones.clear()
+                self._selectionner(None)
+                self._emettre_zones()
+            m.addAction("Effacer toutes les zones", tout_effacer)
+        m.addSeparator()
+        for cle, libelle in self.OUTILS:
+            act = m.addAction(f"Outil : {libelle}")
+            act.setCheckable(True)
+            act.setChecked(cle == self.outil)
+            act.triggered.connect(lambda _=False, c=cle: self.regler_outil(c))
+        m.exec(e.globalPosition().toPoint())
 
     # --- dessin -------------------------------------------------------------------------
     def paintEvent(self, _):
@@ -761,7 +1042,6 @@ class VueVideo(QWidget):
                                                                      h_ * self.devicePixelRatioF()))
             self._dessiner_zone(p, now, QRectF(ox, oy, w_, h_))
             self._dessiner_reperes(p, now, dt)
-            self.setCursor(Qt.CursorShape.CrossCursor if self.zone_active else Qt.CursorShape.ArrowCursor)
         else:
             self._dessiner_attente(p, cadre, now)
         self._dessiner_hud(p, cadre, now)
@@ -799,37 +1079,108 @@ class VueVideo(QWidget):
                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                    self._statut if self._etat != "arret" or self._statut else self.message_vide)
 
+    def _chemin_zone(self, z):
+        ch = QPainterPath()
+        if z.get("points"):
+            ch.addPolygon(QPolygonF([self._vers_ecran(*q) for q in z["points"]]))
+            ch.closeSubpath()
+        else:
+            x1, y1, x2, y2 = z["rect"]
+            ch.addRoundedRect(QRectF(self._vers_ecran(x1, y1), self._vers_ecran(x2, y2)), 4, 4)
+        return ch
+
+    def _apercu(self):
+        """Tracé en cours (rectangle, carré déformable ou lasso) : (chemin, points à marquer) ou None."""
+        a = self._action
+        if not a or a["type"] not in ("rect", "forme", "lasso"):
+            return None
+        if a["type"] == "lasso":
+            if len(a["pts"]) < 2:
+                return None
+            ch = QPainterPath()
+            ch.addPolygon(QPolygonF([self._vers_ecran(*q) for q in a["pts"]]))
+            ch.closeSubpath()
+            return ch, []
+        if not a["boite"]:
+            return None
+        z = {"rect": a["boite"]}
+        return self._chemin_zone(z), ([self._vers_ecran(*q) for q in contour_zone(z)] if a["type"] == "forme" else [])
+
     def _dessiner_zone(self, p, now, rect_img):
-        rects = [(z["nom"], z["rect"]) for z in self._zones] + ([("", self._trace)] if self._trace else [])
-        if not rects:
+        apercu = self._apercu()
+        if not self._zones and apercu is None:
             return
-        ox, oy, s = self._geom
-        iw, ih = self._taille
-        geo = [(nom, QRectF(ox + x1 * iw * s, oy + y1 * ih * s, (x2 - x1) * iw * s, (y2 - y1) * ih * s))
-               for nom, (x1, y1, x2, y2) in rects]
+        chemins = [self._chemin_zone(z) for z in self._zones]
+        trous = QPainterPath()
+        for ch in chemins + ([apercu[0]] if apercu else []):
+            trous = trous.united(ch)
         sombre = QPainterPath()
         sombre.addRect(rect_img)
-        trous = QPainterPath()
-        for _, zr in geo:
-            trous.addRect(zr)
-        p.fillPath(sombre.subtracted(trous.simplified()), QColor(0, 0, 0, 120))
+        p.fillPath(sombre.subtracted(trous), QColor(0, 0, 0, 120))
         pen = QPen(couleur("o_plaque"), 1.8, Qt.PenStyle.CustomDashLine)
         pen.setDashPattern([5, 4])
         pen.setDashOffset((now * 14) % 9 if T.animations else 0)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        sel = self._sel if self.zone_active else None
+        for i, ch in enumerate(chemins):
+            if i == sel:
+                p.setPen(QPen(couleur("o_plaque"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                              Qt.PenJoinStyle.RoundJoin))
+                p.setBrush(couleur("o_plaque", 30))
+            else:
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(ch)
+        if apercu:
+            p.setPen(pen)
+            p.setBrush(couleur("o_plaque", 22))
+            p.drawPath(apercu[0])
+            for q in apercu[1]:
+                self._poignee(p, "sommet", q, False)
         p.setFont(police(max(9, T.taille - 3), True))
         fm = QFontMetrics(p.font())
-        for nom, zr in geo:
-            p.setPen(pen)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(zr, 4, 4)
-            if nom and zr.width() > 30:
-                texte = fm.elidedText(nom, Qt.TextElideMode.ElideRight, int(zr.width()) - 8)
-                r = QRectF(zr.left() + 4, zr.top() + 4, fm.horizontalAdvance(texte) + 12, fm.height() + 4)
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(couleur("o_plaque", 225))
-                p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
-                p.setPen(QColor(8, 14, 26))
-                p.drawText(r, Qt.AlignmentFlag.AlignCenter, texte)
+        for z, ch in zip(self._zones, chemins):
+            boite = ch.boundingRect()
+            if not z["nom"] or boite.width() <= 30:
+                continue
+            if z.get("points"):  # étiquette sous le point le plus haut de la forme
+                haut = min((self._vers_ecran(*q) for q in z["points"]), key=lambda q: (q.y(), q.x()))
+                x, y = haut.x() - 10, haut.y() + 6
+            else:
+                x, y = boite.left() + 4, boite.top() + 4
+            texte = fm.elidedText(z["nom"], Qt.TextElideMode.ElideRight, int(boite.width()) - 8)
+            r = QRectF(x, y, fm.horizontalAdvance(texte) + 12, fm.height() + 4)
+            if z.get("points"):
+                r.moveCenter(QPointF(haut.x(), haut.y() + 12 + r.height() / 2))
+            r.moveLeft(min(max(r.left(), rect_img.left() + 2), rect_img.right() - r.width() - 2))
+            r.moveTop(min(max(r.top(), rect_img.top() + 2), rect_img.bottom() - r.height() - 2))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(couleur("o_plaque", 225))
+            p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+            p.setPen(QColor(8, 14, 26))
+            p.drawText(r, Qt.AlignmentFlag.AlignCenter, texte)
+        if sel is not None and sel < len(self._zones):
+            for typ, k, q in self._poignees(sel):
+                self._poignee(p, typ, q, self._survol == (typ, k))
+
+    @staticmethod
+    def _poignee(p, typ, q, survol):
+        if typ == "milieu":  # « + » discret : tirer pour ajouter un point
+            r = 6.0 if survol else 4.6
+            p.setPen(QPen(QColor(255, 255, 255, 240 if survol else 200), 1.3))
+            p.setBrush(couleur("o_plaque", 235 if survol else 160))
+            p.drawEllipse(q, r, r)
+            p.setPen(QPen(QColor(8, 14, 26), 1.3))
+            p.drawLine(QPointF(q.x() - r + 2, q.y()), QPointF(q.x() + r - 2, q.y()))
+            p.drawLine(QPointF(q.x(), q.y() - r + 2), QPointF(q.x(), q.y() + r - 2))
+            return
+        r = 6.0 if survol else 4.6
+        p.setPen(QPen(couleur("o_plaque"), 2))
+        p.setBrush(QColor(255, 255, 255))
+        if typ == "coin":  # rectangle : coins carrés
+            p.drawRoundedRect(QRectF(q.x() - r, q.y() - r, 2 * r, 2 * r), 1.5, 1.5)
+        else:  # forme libre : points ronds
+            p.drawEllipse(q, r, r)
 
     @staticmethod
     def _crochets(p, rect, couleur_, longueur, epaisseur):
@@ -978,3 +1329,100 @@ class VueVideo(QWidget):
         for libelle, valeur, teinte_c in self._compteurs:
             c = couleur(teinte_c, 255 if valeur else 90)
             x += self._capsule(p, x, cadre.bottom() - 40, f"{libelle}  {valeur}", c) + 8
+
+
+# ---------------------------------------------------------------------------
+# Choix de l'outil de dessin des zones (relié à une VueVideo)
+# ---------------------------------------------------------------------------
+AIDES_OUTILS = {
+    "rect": "Rectangle : glissez sur l'image pour tracer une zone.\nTirez un coin pour la redimensionner, ou le "
+            "« + » au milieu d'un côté pour ajouter un point et la déformer.",
+    "forme": "Carré déformable : glissez pour tracer un carré, puis déplacez chaque point librement.\nTirez un « + » "
+             "ou double-cliquez sur un côté pour ajouter un point. Suppr (ou clic droit) retire le point survolé.",
+    "lasso": "Lasso : dessinez le contour de la zone à main levée, maintenez le clic jusqu'à la fin.\nLa forme reste "
+             "modifiable ensuite, point par point.",
+}
+
+
+class BoutonOutil(QAbstractButton):
+    """Bouton d'outil : icône au-dessus d'un libellé court, coché = outil actif."""
+
+    def __init__(self, texte, icone, parent=None):
+        super().__init__(parent)
+        self.setText(texte)
+        self._icone = icone
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._h, self._c = 0.0, 0.0
+        self._ah = _anim(self, lambda v: self._set("_h", v))
+        self._ac = _anim(self, lambda v: self._set("_c", v))
+        self.toggled.connect(lambda e: _aller(self._ac, self._c, 1.0 if e else 0.0, 180))
+
+    def _set(self, nom, v):
+        setattr(self, nom, float(v))
+        self.update()
+
+    def enterEvent(self, e):
+        _aller(self._ah, self._h, 1.0, 140)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        _aller(self._ah, self._h, 0.0, 140)
+        super().leaveEvent(e)
+
+    def sizeHint(self):
+        fm = QFontMetrics(police(max(9, T.taille - 2), True))
+        return QSize(max(64, fm.horizontalAdvance(self.text()) + 18), int(56 * max(0.85, T.densite)))
+
+    def minimumSizeHint(self):
+        return QSize(56, self.sizeHint().height())
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        teinte = C["o_plaque"]
+        fond = melange(couleur("surface", 255), melange("surface", teinte, 0.2), self._c)
+        fond = melange(fond, couleur("surface2"), self._h * (1 - self._c) * 0.9)
+        p.setPen(QPen(melange("trait", teinte, self._c), 1.2 if self._c > 0.5 else 1))
+        p.setBrush(fond)
+        p.drawRoundedRect(r, T.rayon, T.rayon)
+        if self.hasFocus():
+            p.setPen(QPen(couleur("accent", 150), 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(r.adjusted(2, 2, -2, -2), max(2, T.rayon - 2), max(2, T.rayon - 2))
+        texte = melange("texte2", "texte", self._c)
+        dessiner_icone(p, self._icone, QRectF(r.center().x() - 10, r.top() + 8, 20, 20),
+                       melange("texte2", teinte, self._c))
+        p.setPen(texte)
+        p.setFont(police(max(9, T.taille - 2), True))
+        p.drawText(QRectF(r.left() + 4, r.top() + 30, r.width() - 8, r.height() - 34),
+                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.text())
+
+
+class OutilsZone(QWidget):
+    """Rectangle · Déformable · Lasso : choisit l'outil de dessin des zones de la vue vidéo."""
+
+    def __init__(self, video, parent=None):
+        super().__init__(parent)
+        self.video = video
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self._groupe = QButtonGroup(self)
+        self._groupe.setExclusive(True)
+        self._boutons = {}
+        for cle, libelle in VueVideo.OUTILS:
+            b = BoutonOutil(libelle, f"outil_{cle}")
+            b.setToolTip(AIDES_OUTILS[cle])
+            b.clicked.connect(lambda _=False, c=cle: self.video.regler_outil(c))
+            self._groupe.addButton(b)
+            lay.addWidget(b, 1)
+            self._boutons[cle] = b
+        video.outilChange.connect(self._maj)
+        self._maj(video.outil)
+
+    def _maj(self, cle):
+        for c, b in self._boutons.items():
+            if b.isChecked() != (c == cle):
+                b.setChecked(c == cle)

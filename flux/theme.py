@@ -418,6 +418,32 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.lineTo(13.5, 18.3)
         pp.moveTo(19.5, 7)
         pp.cubicTo(20.8, 8.5, 20.8, 11.5, 19.5, 13)
+    elif nom == "outil_rect":
+        pp.addRoundedRect(QRectF(4.5, 6.5, 15, 11), 1.5, 1.5)
+        p.drawPath(pp)
+        pp = QPainterPath()
+        p.setBrush(couleur_)
+        for cx, cy in ((4.5, 6.5), (19.5, 6.5), (19.5, 17.5), (4.5, 17.5)):
+            pp.addRect(QRectF(cx - 1.6, cy - 1.6, 3.2, 3.2))
+    elif nom == "outil_forme":
+        sommets = ((5, 7.5), (17.5, 4), (20, 16.5), (8, 20))
+        pp.moveTo(*sommets[0])
+        for s_ in sommets[1:]:
+            pp.lineTo(*s_)
+        pp.closeSubpath()
+        p.drawPath(pp)
+        pp = QPainterPath()
+        p.setBrush(couleur_)
+        for cx, cy in sommets:
+            pp.addEllipse(QPointF(cx, cy), 1.9, 1.9)
+    elif nom == "outil_lasso":
+        pp.moveTo(9, 15.6)
+        pp.cubicTo(4.5, 14.5, 2.8, 11.5, 4.2, 8.5)
+        pp.cubicTo(6, 4.6, 13, 3.4, 17.6, 5.2)
+        pp.cubicTo(21.5, 6.8, 21.4, 11.6, 17.6, 13.8)
+        pp.cubicTo(15.4, 15.1, 12, 15.8, 9, 15.6)
+        pp.cubicTo(10.6, 17.2, 9.8, 19.6, 7.2, 20.8)
+        pp.addEllipse(QPointF(9, 15.6), 1.5, 1.5)
     elif nom == "theme":
         pp.addEllipse(QRectF(4, 4, 16, 16))
         p.drawPath(pp)

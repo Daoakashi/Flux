@@ -28,3 +28,7 @@
 [11/10 18:54:40] [FluxLite] Pilotage à distance — Marie Martin a désactivé : Détection (toutes les caméras).
 [11/10 18:54:41] [FluxLite] Pilotage à distance — Marie Martin a choisi le niveau de scan Précis.
 [11/10 18:54:41] [FluxLite] Pilotage à distance — Marie Martin a réglé « Délai entre deux notifications » sur 12.5 min.
+[11/10 21:01:50] [Système] OpenCV 5 détecté : certaines fonctions ne sont pas encore compatibles. Installez la version 4 avec : pip install "opencv-python>=4.10,<5"
+[11/10 21:01:55] [Système] OpenCV 5 détecté : certaines fonctions ne sont pas encore compatibles. Installez la version 4 avec : pip install "opencv-python>=4.10,<5"
+[11/10 21:02:01] [Système] OpenCV 5 détecté : certaines fonctions ne sont pas encore compatibles. Installez la version 4 avec : pip install "opencv-python>=4.10,<5"
+[11/10 21:02:10] [Système] OpenCV 5 détecté : certaines fonctions ne sont pas encore compatibles. Installez la version 4 avec : pip install "opencv-python>=4.10,<5"

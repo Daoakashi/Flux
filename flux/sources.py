@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from urllib.parse import urlparse
 
 import cv2
+import numpy as np
 
 from .vision import NOMS_VEHICULES, Pipeline, sans_accents
 
@@ -186,9 +187,15 @@ def dessiner(img, ann):
     zones = ann.get("zones") or ([{"nom": "", "rect": ann["zone"]}] if ann.get("zone") else [])
     for z in zones:
         x1, y1, x2, y2 = z["rect"]
-        cv2.rectangle(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)), COULEURS_PHOTO["zone"], 2)
+        if z.get("points"):  # forme libre (lasso, carré déformé)
+            pts = np.array([[int(x * w), int(y * h)] for x, y in z["points"]], np.int32)
+            cv2.polylines(img, [pts], True, COULEURS_PHOTO["zone"], 2, cv2.LINE_AA)
+            xt, yt = min(((int(x * w), int(y * h)) for x, y in z["points"]), key=lambda p: (p[1], p[0]))
+        else:
+            cv2.rectangle(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)), COULEURS_PHOTO["zone"], 2)
+            xt, yt = int(x1 * w), int(y1 * h)
         if z.get("nom") and len(zones) > 1:
-            cv2.putText(img, sans_accents(z["nom"]), (int(x1 * w) + 4, int(y1 * h) + 18), cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(img, sans_accents(z["nom"]), (xt + 4, yt + 18), cv2.FONT_HERSHEY_SIMPLEX,
                         0.55, COULEURS_PHOTO["zone"], 2)
 
     def cadre(box, c, texte):

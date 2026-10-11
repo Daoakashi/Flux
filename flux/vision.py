@@ -333,12 +333,82 @@ def obtenir_detecteur_optimise(nom, rappel=None, moteur="pytorch", taille=640, e
     return modele, verrou, "pytorch"
 
 
+MAX_POINTS_ZONE = 200
+
+
+def _points_valides(pts):
+    """Liste de points (x, y) 0-1 d'une forme libre, ou None si la forme est inutilisable."""
+    try:
+        sortie = [(min(max(float(p[0]), 0.0), 1.0), min(max(float(p[1]), 0.0), 1.0)) for p in pts][:MAX_POINTS_ZONE]
+    except (TypeError, ValueError, IndexError):
+        return None
+    return sortie if len(sortie) >= 3 else None
+
+
+def boite_points(pts):
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def normaliser_zone(z, i=0):
+    """Zone propre : {"nom", "rect": (x1, y1, x2, y2)} et, pour une forme libre (lasso, carré déformé),
+    "points": [(x, y), …]. "rect" est alors le rectangle qui entoure la forme : tout ce qui ne connaît que les
+    rectangles (recadrage de l'analyse, groupes, détection de mouvement) continue de fonctionner."""
+    if not isinstance(z, dict):
+        return None
+    nom = str(z.get("nom") or f"Zone {i + 1}")
+    pts = _points_valides(z["points"]) if z.get("points") else None
+    if pts:
+        return {"nom": nom, "rect": boite_points(pts), "points": pts}
+    if not z.get("rect"):
+        return None
+    try:
+        x1, y1, x2, y2 = (float(v) for v in z["rect"])
+    except (TypeError, ValueError):
+        return None
+    return {"nom": nom, "rect": (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))}
+
+
+def copie_zone(z):
+    """Copie d'une zone prête à être enregistrée en JSON (listes au lieu de tuples)."""
+    c = {"nom": z["nom"], "rect": [float(v) for v in z["rect"]]}
+    if z.get("points"):
+        c["points"] = [[round(float(x), 5), round(float(y), 5)] for x, y in z["points"]]
+    return c
+
+
+def contour_zone(z):
+    """Contour d'une zone : les points de la forme libre, ou les quatre coins du rectangle."""
+    if z.get("points"):
+        return [tuple(p) for p in z["points"]]
+    x1, y1, x2, y2 = z["rect"]
+    return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+
+
+def point_dans_zone(x, y, z):
+    """Vrai si le point (x, y) (coordonnées 0-1) est dans la zone (rectangle ou forme libre)."""
+    x1, y1, x2, y2 = z["rect"]
+    if not (x1 <= x <= x2 and y1 <= y <= y2):
+        return False
+    pts = z.get("points")
+    if not pts:
+        return True
+    dedans, n = False, len(pts)
+    xj, yj = pts[-1]
+    for k in range(n):  # lancer de rayon (règle pair-impair)
+        xi, yi = pts[k]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi:
+            dedans = not dedans
+        xj, yj = xi, yi
+    return dedans
+
+
 def zones_options(o):
-    """Zones d'une source : liste {"nom", "rect": (x1, y1, x2, y2)} (coordonnées 0-1). Lit l'ancien format « zone »."""
+    """Zones d'une source : liste {"nom", "rect": (x1, y1, x2, y2)[, "points"]} (coordonnées 0-1).
+    Lit aussi l'ancien format « zone » (un seul rectangle)."""
     zs = o.get("zones")
     if zs:
-        return [{"nom": str(z.get("nom") or f"Zone {i + 1}"), "rect": tuple(z["rect"])}
-                for i, z in enumerate(zs) if isinstance(z, dict) and z.get("rect")]
+        return [n for n in (normaliser_zone(z, i) for i, z in enumerate(zs)) if n]
     z = o.get("zone")
     return [{"nom": "Zone 1", "rect": tuple(z)}] if z else []
 
@@ -748,16 +818,17 @@ class Pipeline:
 
     # --- outils -----------------------------------------------------------------------
     @staticmethod
-    def _dans_rect(box, w, h, rect):
-        x1, y1, x2, y2 = rect
-        cx, cy = (box[0] + box[2]) / 2 / w, (box[1] + box[3]) / 2 / h
-        return x1 <= cx <= x2 and y1 <= cy <= y2
+    def _dans_rect(box, w, h, zone):
+        """Vrai si le centre du cadre est dans la zone (rectangle, forme libre, ou ancien tuple de rectangle)."""
+        if not isinstance(zone, dict):
+            zone = {"rect": zone}
+        return point_dans_zone((box[0] + box[2]) / 2 / w, (box[1] + box[3]) / 2 / h, zone)
 
     def _dans_zone(self, box, w, h):
         """Vrai si le centre du cadre est dans au moins une zone (ou s'il n'y a pas de zone)."""
         if not self._zs:
             return True
-        return any(self._dans_rect(box, w, h, z["rect"]) for z in self._zs)
+        return any(self._dans_rect(box, w, h, z) for z in self._zs)
 
     def _region_utile(self, W, H):
         """Rectangle englobant les zones (+ marge) : l'analyse se fait sur ce recadrage, donc en plus haute
@@ -1093,7 +1164,7 @@ class Pipeline:
                 continue
             self._resoudre_identite(p, frame, enregistrer, t)
             for z in self._zs:
-                dedans = self._dans_rect(p.box, w, h, z["rect"])
+                dedans = self._dans_rect(p.box, w, h, z)
                 avant = p.dans_zones.get(z["nom"])
                 if avant is not None and dedans != avant:
                     if len(self._zs) == 1:
