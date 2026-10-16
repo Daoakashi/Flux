@@ -99,7 +99,8 @@ class Reglage:
 R = Reglage
 CATEGORIES = [
     ("apparence", "Apparence"), ("detection", "Détection"), ("basse_lumiere", "Basse lumière"),
-    ("visages", "Visages et reconnaissance"), ("plaques", "Plaques"), ("base", "Base de données"),
+    ("visages", "Visages et reconnaissance"), ("confidentialite", "Confidentialité (flou des têtes)"),
+    ("plaques", "Plaques"), ("base", "Base de données"),
     ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
     ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("lecteur", "Lecteur vidéo"),
     ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
@@ -209,6 +210,19 @@ SCHEMA = [
       "Plus bas = expression plus stable d'une image à l'autre.", None, 0.1, 1.0, 0.05, "", True),
 
     # --- Plaques -------------------------------------------------------------------------
+    # --- Confidentialité ------------------------------------------------------------------
+    R("confidentialite.flouter", "confidentialite", "Flouter les têtes sur les photos et vidéos", "bool", False,
+      "Captures, photos d'alerte (mail, notifications), miniatures du journal, vidéos des passages et "
+      "enregistrements : les têtes sont floutées avant d'être enregistrées ou envoyées. La détection et la "
+      "reconnaissance continuent de fonctionner normalement."),
+    R("confidentialite.ecran", "confidentialite", "Flouter aussi l'image en direct", "bool", False,
+      "Les têtes sont aussi floutées à l'écran et dans FluxLite (utile si l'écran est visible du public)."),
+    R("confidentialite.cible", "confidentialite", "Ce qui est flouté", "choix", "tetes",
+      "« Têtes » floute aussi les personnes vues de dos ou trop loin pour qu'un visage soit trouvé.",
+      [("tetes", "Les têtes (visages + haut des silhouettes)"), ("visages", "Les visages seulement")]),
+    R("confidentialite.style", "confidentialite", "Effet", "choix", "flou", "",
+      [("flou", "Flou"), ("pixels", "Pixels"), ("noir", "Cache noir")]),
+
     R("plaques.confiance_lecture", "plaques", "Confiance minimale de lecture", "float", 0.6, "", None, 0.3, 0.99, 0.01),
     R("plaques.relecture", "plaques", "Relire une plaque après", "float", 5.0, "", None, 1, 60, 1, " s", True),
     R("plaques.liste_noire", "plaques", "Plaques en liste noire", "texte", "",

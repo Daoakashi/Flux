@@ -329,7 +329,9 @@ class PageFlux(QWidget):
         dossier = self.cfg.dossier_sortie()
         os.makedirs(dossier, exist_ok=True)
         chemin = os.path.join(dossier, datetime.now().strftime("capture_%Y%m%d_%H%M%S_") + slug(self.nom) + ".jpg")
-        cv2.imwrite(chemin, dessiner(img, ann) if ann else img)
+        from .confidentialite import proteger
+        img = proteger(img, ann, self.cfg)  # têtes floutées si l'option est cochée
+        cv2.imwrite(chemin, dessiner(img.copy(), ann) if ann else img)
         self.fen.toast(f"Capture enregistrée : {os.path.basename(chemin)}", "ok")
 
     def _clip(self):

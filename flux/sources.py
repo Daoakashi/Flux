@@ -367,6 +367,8 @@ class Detecteur(threading.Thread):
         self.heure_image = 0.0  # heure de réception de l'image affichée (mesure du délai d'affichage)
         self.fps_analyse = 0.0
         self._image_amelioree = False  # l'analyse fournit l'image éclaircie à afficher (basse lumière)
+        from .basse_lumiere import AmelioreurAffichage
+        self._ecran_nuit = AmelioreurAffichage()  # éclaircit chaque image affichée (rapide, pleine résolution)
         self._t_directe = 0.0
         self.resolution = None  # (largeur, hauteur) du flux, affichée dans l'interface
         self.veille = False     # analyse en pause : image vide et immobile
@@ -403,10 +405,28 @@ class Detecteur(threading.Thread):
         elif choix == "passages" and niveau == "action" and extra.get("type_action") == "apparition":
             self.clips.declencher("passage", texte)
 
+    def _nuit_a_l_ecran(self):
+        """« Afficher l'image améliorée » : seulement quand l'analyse a jugé l'image sombre."""
+        return (bool(self.cfg.get("basse_lumiere.afficher")) and self.pipeline.basse_lumiere_active
+                and self.detection_active())
+
+    def _pour_ecran(self, image):
+        if self._nuit_a_l_ecran():
+            try:
+                image = self._ecran_nuit.appliquer(image, float(self.cfg.get("basse_lumiere.contraste")))
+            except Exception:  # noqa: BLE001  — l'affichage ne doit jamais s'arrêter
+                pass
+        from .confidentialite import actif_ecran, proteger
+        if actif_ecran(self.cfg):  # têtes floutées aussi à l'écran et dans FluxLite
+            image = proteger(image, self.annotations, self.cfg, detecter=False, marge=0.45)
+        return image
+
     def _image_directe(self, image, heure):
-        """Appelée par le fil de lecture pour chaque image d'un direct : affichage immédiat."""
-        if self._image_amelioree or self.stop_event.is_set():
+        """Appelée par le fil de lecture pour chaque image d'un direct : affichage immédiat, même de nuit
+        (l'image est éclaircie ici, en quelques ms, au lieu d'attendre l'analyse)."""
+        if self.stop_event.is_set():
             return
+        image = self._pour_ecran(image)
         with self.lock:
             self.derniere_image = image
             self.heure_image = heure
@@ -424,6 +444,9 @@ class Detecteur(threading.Thread):
 
     def _publier(self, texte, niveau="info", image=None, ann=None, **extra):
         chemin = octets = None
+        if image is not None:  # confidentialité : têtes floutées avant tout enregistrement ou envoi
+            from .confidentialite import proteger
+            image = proteger(image, ann, self.cfg)
         if image is not None and niveau == "alerte":
             photo = dessiner(image.copy(), ann) if ann else image
             ok, buf = cv2.imencode(".jpg", photo, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -647,26 +670,28 @@ class Detecteur(threading.Thread):
                 ann = dict(ann, image_affichee=None)
 
             if self.o.get("enregistrer"):
-                self._gerer_enregistrement(dessiner(frame.copy(), ann), fps_source)
+                from .confidentialite import proteger
+                image_enreg = proteger(frame, ann, self.cfg, detecter=False, marge=0.45)
+                self._gerer_enregistrement(dessiner(image_enreg.copy(), ann), fps_source)
             else:
                 self._gerer_enregistrement(None, fps_source)
 
             maintenant = time.time()
             fps = 1.0 / max(maintenant - dernier, 1e-6)
             dernier = maintenant
-            ameliore = ann.get("image_affichee") is not None
             direct_continu = isinstance(cap, LectureContinue)
-            self._image_amelioree = ameliore
+            # Direct : l'image affichée vient du fil de lecture (_image_directe), éclaircie au besoin, au rythme
+            # de la caméra. Vidéo ou fichier : affichée ici, avec son analyse.
+            self._image_amelioree = False
             with self.lock:
                 self.annotations = ann
                 self.fps_analyse = 0.9 * self.fps_analyse + 0.1 * fps if self.fps_analyse else fps
-                if not direct_continu or ameliore:
-                    # vidéo (rythme de la vidéo) ou image éclaircie : affichée avec son analyse
-                    self.derniere_image = ann["image_affichee"] if ameliore else frame
+                if not direct_continu:
+                    self.derniere_image = self._pour_ecran(frame)
                     self.heure_image = getattr(cap, "heure", 0.0) or debut
                     self.fps = self.fps_analyse
-            if not direct_continu or ameliore:
-                self.clips.ajouter(self.derniere_image, time.time(), None if ameliore else ann)
+            if not direct_continu:
+                self.clips.ajouter(self.derniere_image, time.time(), ann)
             if est_fichier:
                 reste = 1.0 / fps_source - (time.time() - debut)
                 if reste > 0:

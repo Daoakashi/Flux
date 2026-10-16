@@ -100,6 +100,8 @@ class EnregistreurClips:
                     threading.Thread(target=self._terminer, args=(c,), daemon=True, name="flux-clip").start()
 
     def _preparer(self, frame, ann):
+        from .confidentialite import proteger
+        frame = proteger(frame, ann, self.cfg, detecter=False, marge=0.45)  # confidentialité (si cochée)
         if ann and self.cfg.get("clips.cadres"):
             from .sources import dessiner
             frame = dessiner(frame.copy(), ann)

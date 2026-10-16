@@ -542,26 +542,9 @@ def luminance(img):
 
 
 def ameliorer_basse_lumiere(img, debruitage=10, contraste=1.8, fine=False):
-    """Éclaircit par un gamma adapté à la luminosité, débruite, puis renforce le contraste local.
-
-    fine=False : une passe de débruitage sur une copie réduite à 640 px (~0,25 s sur processeur).
-    fine=True  : débruitage avant et après l'éclaircissement, à 960 px (plus lent, nettement meilleur dans
-                 le noir quasi total ; utilisé par les niveaux Précis et Maximum).
-    Le résultat garde la taille d'origine, pour que les coordonnées des détections restent valables."""
-    h, w = img.shape[:2]
-    f = min(1.0, (960.0 if fine else 640.0) / max(h, w))
-    x = cv2.resize(img, None, fx=f, fy=f, interpolation=cv2.INTER_AREA) if f < 1 else img
-    lum = max(luminance(x), 1.0) / 255.0
-    gamma = float(np.clip(np.log(lum) / np.log(0.42), 1.0, 5.0))
-    if debruitage and fine:
-        x = cv2.fastNlMeansDenoisingColored(x, None, debruitage * 0.4, debruitage * 0.4, 5, 15)
-    x = cv2.LUT(x, ((np.arange(256) / 255.0) ** (1 / gamma) * 255).astype(np.uint8))
-    if debruitage:
-        x = cv2.fastNlMeansDenoisingColored(x, None, debruitage, debruitage, 7 if fine else 5, 21 if fine else 11)
-    if contraste > 0:
-        l, a, b = cv2.split(cv2.cvtColor(x, cv2.COLOR_BGR2LAB))
-        x = cv2.cvtColor(cv2.merge((cv2.createCLAHE(contraste, (8, 8)).apply(l), a, b)), cv2.COLOR_LAB2BGR)
-    return cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR) if f < 1 else x
+    """Image de nuit éclaircie pour la détection (voir flux/basse_lumiere.py). Garde la taille d'origine."""
+    from .basse_lumiere import ameliorer
+    return ameliorer(img, debruitage, contraste, fine)
 
 
 # ---------------------------------------------------------------------------
