@@ -378,6 +378,8 @@ class Detecteur(threading.Thread):
         self.pipeline = Pipeline(nom, cfg, options, self._recevoir, base)
         from .clips import EnregistreurClips
         self.clips = EnregistreurClips(nom, cfg, self._clip_fini)
+        from .frequentation import Collecteur
+        self.frequentation = Collecteur(nom, base, cfg)  # carte de chaleur et statistiques (anonymes)
 
     def _clip_fini(self, info):
         """Appelée depuis le fil d'encodage quand une vidéo est prête."""
@@ -550,6 +552,10 @@ class Detecteur(threading.Thread):
         finally:
             self.charge = False
             self.clips.vider()
+            try:
+                self.frequentation.vider()
+            except Exception:  # noqa: BLE001
+                pass
             if self.writer is not None:
                 self.writer.release()
                 self.writer = None
@@ -668,6 +674,10 @@ class Detecteur(threading.Thread):
                     self._ref_mouvement = self._petite_image(frame)
             elif ann is not None:
                 ann = dict(ann, image_affichee=None)
+            try:
+                self.frequentation.ajouter(ann, frame)
+            except Exception:  # noqa: BLE001  — les statistiques ne doivent jamais arrêter une caméra
+                pass
 
             if self.o.get("enregistrer"):
                 from .confidentialite import proteger

@@ -76,6 +76,21 @@ def _ann_valides(img, ann):
     return not aw or not ah or (abs(aw - w) <= 2 and abs(ah - h) <= 2)
 
 
+def tete_estimee(x1, y1, x2, y2):
+    """Où est la tête dans le cadre d'une personne ? Dépend du cadrage :
+      - silhouette entière (cadre 2 à 3 fois plus haut que large) : petite tête en haut ;
+      - personne proche, vue jusqu'à la taille : la tête occupe environ un tiers de la hauteur ;
+      - tout près de la caméra (tête et épaules) : la tête occupe plus de la moitié du cadre.
+    La zone est toujours plus haute que large (forme d'un visage), jamais une bande plate sur le front."""
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    part = float(np.clip(0.5 / (bh / bw), 0.14, 0.75))  # part de la hauteur occupée par la tête
+    hauteur = part * bh
+    largeur = min(0.9 * bw, 0.82 * hauteur)
+    cx = (x1 + x2) / 2
+    haut = y1 - 0.05 * hauteur
+    return [cx - largeur / 2, haut, cx + largeur / 2, haut + hauteur * 1.05]
+
+
 def boites_tetes(img, ann=None, cible="tetes", detecter=True):
     boites = []
     if _ann_valides(img, ann):
@@ -83,14 +98,7 @@ def boites_tetes(img, ann=None, cible="tetes", detecter=True):
             boites.append(list(v["box"][:4]))
         if cible == "tetes":
             for p in ann.get("personnes", []) or []:
-                x1, y1, x2, y2 = (float(v) for v in p[:4])
-                bw, bh = x2 - x1, y2 - y1
-                if bw <= 2 or bh <= 2:
-                    continue
-                largeur = bw * 0.6
-                hauteur = min(bh * 0.24, largeur * 1.35)
-                cx = (x1 + x2) / 2
-                boites.append([cx - largeur / 2, y1 - 0.03 * bh, cx + largeur / 2, y1 + hauteur])
+                boites.append(tete_estimee(*(float(v) for v in p[:4])))
     if detecter:
         boites += detecter_visages(img)
     return boites

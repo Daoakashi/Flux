@@ -100,7 +100,7 @@ R = Reglage
 CATEGORIES = [
     ("apparence", "Apparence"), ("detection", "Détection"), ("basse_lumiere", "Basse lumière"),
     ("visages", "Visages et reconnaissance"), ("confidentialite", "Confidentialité (flou des têtes)"),
-    ("plaques", "Plaques"), ("base", "Base de données"),
+    ("plaques", "Plaques"), ("frequentation", "Fréquentation (heatmap)"), ("base", "Base de données"),
     ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
     ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("lecteur", "Lecteur vidéo"),
     ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
@@ -242,6 +242,14 @@ SCHEMA = [
       "Séparées par des virgules, avec ou sans tirets (1-ABC-234, AB123CD…). Nécessite « Lire les plaques » "
       "sur la caméra."),
 
+    # --- Fréquentation ------------------------------------------------------------------
+    R("frequentation.actif", "frequentation", "Mesurer la fréquentation", "bool", True,
+      "Enregistre où se tiennent les personnes et combien elles sont, heure par heure, pour la carte de chaleur et "
+      "les statistiques (page Fréquentation). Données anonymes : aucune image de personne ni identité."),
+    R("frequentation.conservation", "frequentation", "Conserver les statistiques", "int", 365,
+      "0 = sans limite.", None, 0, 3650, 1, " jours"),
+    R("frequentation.opacite", "frequentation", "Intensité de la carte de chaleur", "int", 75, "", None, 20, 100, 5,
+      " %"),
     # --- Base de données -----------------------------------------------------------------
     R("base.actions", "base", "Enregistrer les actions", "bool", True,
       "Apparitions, identifications, entrées dans la zone, stationnements et départs."),

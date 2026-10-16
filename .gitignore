@@ -15,3 +15,6 @@ __pycache__/
 *.pt
 flux.ico
 flux.png
+
+# données privées de FluxLite (clé du serveur, comptes)
+fluxlite/

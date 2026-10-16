@@ -412,6 +412,11 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.addEllipse(QRectF(4, 4, 12, 12))
         pp.moveTo(14.5, 14.5)
         pp.lineTo(20, 20)
+    elif nom == "frequentation":  # carte de chaleur : trois foyers concentriques
+        pp.addRoundedRect(QRectF(3, 4.5, 18, 15), 3, 3)
+        pp.addEllipse(QPointF(9.5, 12.5), 3.6, 3.6)
+        pp.addEllipse(QPointF(9.5, 12.5), 1.2, 1.2)
+        pp.addEllipse(QPointF(15.8, 9.2), 1.8, 1.8)
     elif nom == "telephone":
         pp.addRoundedRect(QRectF(6.5, 2.5, 11, 19), 2.6, 2.6)
         pp.moveTo(10.5, 18.3)

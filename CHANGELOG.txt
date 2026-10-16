@@ -1,3 +1,24 @@
+Beta Version 0.9.4 alpha
++ Ajouts
+  - Nouvelle page « Fréquentation » : carte de chaleur (heatmap) qui montre où les personnes se
+    tiennent le plus, sur l'image de la caméra (bleu = peu de monde, rouge = beaucoup de monde).
+    - Périodes : aujourd'hui, hier, 7 jours, 30 jours, tout.
+    - Statistiques : passages (personnes différentes), présence moyenne, pic de personnes en même
+      temps, heure de pointe, graphique par heure de la journée et par jour.
+    - Par zone : part du temps de présence, nombre de passages et temps moyen passé dans chaque
+      zone de détection (rayons, caisse, entrée…). Interrupteur pour afficher les zones sur la carte.
+    - Export de la carte en image (PNG) et des statistiques en CSV (Excel).
+    - Données anonymes : seules des positions et des comptages sont enregistrés (par heure), jamais
+      d'image de personne ni d'identité. Le fond de la carte est composé de plusieurs images où les
+      personnes sont effacées, et les têtes y sont floutées si la confidentialité est activée.
+    Réglages › Fréquentation : activer la collecte (activée), durée de conservation (365 jours),
+    opacité de la carte (75 %).
+* Bug résolus
+  - Flou des têtes : quand une personne était très proche de la caméra (seulement la tête et les
+    épaules à l'image), le flou devenait une ellipse plate et horizontale qui ne cachait que le front.
+    La taille de la tête est maintenant estimée selon la forme de la silhouette : en gros plan,
+    toute la tête est cachée par une ellipse verticale.
+
 Beta Version 0.9.3 alpha
 * Bug résolus
   - Animaux pris pour des personnes (surtout la nuit, en infrarouge) : chiens, chats, oiseaux,

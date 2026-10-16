@@ -31,7 +31,8 @@ from .widgets import Bouton, BoutonNav, Logo, Toasts, etiquette
 from . import vision
 
 PAGES = [("cameras", "Caméras", "cameras"), ("lecteur", "Lecteur", "lecteur"), ("personnes", "Personnes", "personnes"),
-         ("journal", "Journal", "journal"), ("mobile", "FluxLite", "telephone"), ("reglages", "Réglages", "reglages")]
+         ("journal", "Journal", "journal"), ("frequentation", "Fréquentation", "frequentation"),
+         ("mobile", "FluxLite", "telephone"), ("reglages", "Réglages", "reglages")]
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +475,12 @@ class FenetrePrincipale(QMainWindow):
         self.page_personnes = PagePersonnes(self)
         self.page_journal = PageJournal(self)
         self.page_mobile = PageFluxLite(self)
+        from .page_frequentation import PageFrequentation
+        self.page_frequentation = PageFrequentation(self)
         self.page_reglages = PageReglages(self)
         self.pages = {"cameras": self.page_cameras, "lecteur": self.page_lecteur, "personnes": self.page_personnes,
-                      "journal": self.page_journal, "mobile": self.page_mobile, "reglages": self.page_reglages}
+                      "journal": self.page_journal, "frequentation": self.page_frequentation,
+                      "mobile": self.page_mobile, "reglages": self.page_reglages}
         for p in self.pages.values():
             self.pile.addWidget(p)
         zv.addWidget(self.pile)
@@ -551,6 +555,9 @@ class FenetrePrincipale(QMainWindow):
             self.page_journal.rafraichir()
         elif cle == "mobile":
             self.maj_badge_fluxlite()
+        elif cle == "frequentation":
+            self.page_frequentation.actualiser_liste()
+            self.page_frequentation.rafraichir()
 
     def maj_badge_fluxlite(self):
         """Pastille sur « FluxLite » : nombre de comptes qui attendent votre validation."""
