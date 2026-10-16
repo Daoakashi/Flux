@@ -132,12 +132,9 @@ activer() {
   <placement><policy>Smart</policy><center>yes</center></placement>
   <desktops><number>1</number></desktops>
   <keyboard></keyboard>
-  <mouse>
-    <context name="Frame"><mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind></context>
-    <context name="Client"><mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind></context>
-    <context name="Titlebar"><mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
-      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind></context>
-  </mouse>
+  <!-- aucune liaison de souris : les clics vont directement a Flux (une liaison « Client »
+       gele le pointeur avec Qt jusqu'a l'appui sur une touche) -->
+  <mouse><dragThreshold>8</dragThreshold><doubleClickTime>400</doubleClickTime></mouse>
   <menu></menu>
   <applications>
     <application class="*"><decor>no</decor><focus>yes</focus></application>
