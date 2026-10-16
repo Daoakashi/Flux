@@ -1,3 +1,18 @@
+Beta Version 0.9.2 alpha
++ Ajouts
+  - Flou des têtes (Réglages › Confidentialité, option à cocher, désactivée par défaut) : les têtes
+    sont floutées avant d'être enregistrées ou envoyées (captures, photos d'alerte par mail et
+    notifications, miniatures du journal, vidéos des passages, enregistrements). Option « Flouter aussi
+    l'image en direct » pour l'écran et FluxLite. Au choix : les têtes (visages + haut des silhouettes,
+    même de dos) ou les visages seulement ; effet flou, pixels ou cache noir. La détection et la
+    reconnaissance continuent de fonctionner. Aucune dépendance ajoutée (OpenCV et YuNet).
+* Bug résolus
+  - Image de nuit en mode détection : effet « peinture » baveux et ciel brûlé avec les caméras
+    infrarouges, et affichage tombé à ~20 images/s avec « Afficher l'image améliorée ». L'image de nuit
+    est maintenant traitée en noir et blanc pour l'infrarouge (débruitage adapté au grain réel,
+    contraste plus doux), l'écran est éclairci image par image au rythme de la caméra, et l'analyse
+    de nuit est environ 4 fois plus rapide.
+
 Beta Version 0.9.1 alpha
 + Ajouts
   - Flux Remote : programme pour PC (Windows et Linux) qui pilote Flux à distance, comme une
