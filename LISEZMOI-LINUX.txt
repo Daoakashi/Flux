@@ -84,6 +84,25 @@ Réglages › Développeur : nom de l'application, sous-titre, version affichée
 édition de version.json, éditeur de config.json avec vérification avant d'appliquer, et
 préparation d'une archive de publication.
 
+MODE KIOSQUE (le PC n'affiche que Flux)
+---------------------------------------
+Pour un poste de surveillance dédié : au démarrage, le PC ouvre directement Flux en plein écran,
+sans bureau ni barre des tâches. Flux ne peut pas être fermé, se relance tout seul s'il plante ou
+après une mise à jour, et l'écran ne se met jamais en veille.
+  Activer (Flux déjà installé, terminal ouvert dans le dossier de Flux) :
+      sudo bash kiosque.sh activer
+    Un code administrateur est demandé : il sert à quitter le kiosque. Options :
+      --redemarrage 4     redémarre le PC chaque nuit à 4 h (conseillé pour un poste 24h/24)
+      --verrouiller       bloque aussi Ctrl+Alt+F1…F6 (terminaux)
+  Quitter le kiosque : Ctrl+Alt+Maj+Q, puis le code administrateur. Le PC revient à l'écran de
+    connexion : choisissez votre session habituelle (Cinnamon) pour retrouver le bureau.
+  Désactiver pour de bon :  sudo bash kiosque.sh desactiver
+  Changer le code :         sudo bash kiosque.sh code
+  Vérifier :                bash kiosque.sh etat
+  Journal du kiosque : ~/.local/state/flux-kiosque.log
+Conseil : dans le BIOS du mini-PC, réglez « Restore on AC Power Loss » sur « Power On » pour
+qu'il redémarre tout seul après une coupure de courant.
+
 RACCOURCIS
 ----------
   Ctrl+1…5  pages        Ctrl+N  ajouter une caméra     Ctrl+O  ouvrir une vidéo

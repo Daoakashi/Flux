@@ -29,6 +29,7 @@ from .taches import Tache
 from .theme import C, T, couleur, dessiner_logo, icone_application, police, regler_logo
 from .widgets import Bouton, BoutonNav, Logo, Toasts, etiquette
 from . import vision
+from . import kiosque
 
 PAGES = [("cameras", "Caméras", "cameras"), ("lecteur", "Lecteur", "lecteur"), ("personnes", "Personnes", "personnes"),
          ("journal", "Journal", "journal"), ("frequentation", "Fréquentation", "frequentation"),
@@ -163,6 +164,59 @@ def charger(signal_etape, cfg):
 # ---------------------------------------------------------------------------
 # Fenêtre principale
 # ---------------------------------------------------------------------------
+class DialogueKiosque(QDialog):
+    """Code administrateur pour quitter le mode kiosque. Trois erreurs : la fenêtre se ferme."""
+
+    def __init__(self, fen):
+        from PySide6.QtWidgets import QLineEdit
+        super().__init__(fen)
+        self.fen = fen
+        self.setWindowTitle("Quitter le mode kiosque")
+        self.setMinimumWidth(400)
+        self.essais = 0
+        v = QVBoxLayout(self)
+        v.setContentsMargins(22, 20, 22, 18)
+        v.setSpacing(10)
+        t = QLabel("Quitter le mode kiosque")
+        t.setObjectName("titre")
+        v.addWidget(t)
+        v.addWidget(etiquette("Flux va se fermer et le PC reviendra à l'écran de connexion. Tapez le code "
+                              "administrateur choisi lors de l'activation du kiosque."))
+        self.code = QLineEdit()
+        self.code.setEchoMode(QLineEdit.EchoMode.Password)
+        self.code.setPlaceholderText("Code administrateur")
+        v.addWidget(self.code)
+        self.lbl = etiquette("", "aide")
+        self.lbl.setStyleSheet(f"color: {C['danger']};")
+        v.addWidget(self.lbl)
+        h = QHBoxLayout()
+        h.addStretch(1)
+        b0 = Bouton("Annuler")
+        b0.clicked.connect(self.reject)
+        b0.setAutoDefault(False)
+        b1 = Bouton("Quitter le kiosque", "primaire")
+        b1.setDefault(True)  # Entrée valide (une seule fois)
+        b1.clicked.connect(self._ok)
+        h.addWidget(b0)
+        h.addWidget(b1)
+        v.addLayout(h)
+        self.code.setFocus()
+
+    def _ok(self):
+        if kiosque.verifier(self.code.text()):
+            self.accept()
+            return
+        self.essais += 1
+        self.fen.cfg_journal_kiosque("Tentative de sortie du kiosque : code incorrect")
+        self.code.clear()
+        if self.essais >= 3:
+            self.fen.toast("Code incorrect.", "erreur")
+            self.reject()
+        else:
+            self.lbl.setText(f"Code incorrect ({3 - self.essais} essai{'s' if self.essais < 2 else ''} restant"
+                             f"{'s' if self.essais < 2 else ''}).")
+
+
 class APropos(QDialog):
     def __init__(self, fen):
         super().__init__(fen)
@@ -366,6 +420,8 @@ class FenetrePrincipale(QMainWindow):
     def __init__(self, cfg, base, info=None):
         super().__init__()
         self.cfg, self.base = cfg, base
+        self.kiosque = kiosque.actif()
+        self._sortie_kiosque = False
         self.info_appareil = info or {}
         self.setWindowIcon(icone_application())
         self.setMinimumSize(1100, 700)
@@ -521,12 +577,41 @@ class FenetrePrincipale(QMainWindow):
         for seq, f in (("Ctrl+N", lambda: (self.aller("cameras"), self.page_cameras.nouvelle())),
                        ("Ctrl+O", lambda: (self.aller("lecteur"), self.page_lecteur.ouvrir_fichier())),
                        ("Ctrl+,", lambda: self.aller("reglages")),
-                       ("F11", lambda: self.showNormal() if self.isFullScreen() else self.showFullScreen()),
+                       ("F11", self._basculer_plein_ecran),
                        ("Ctrl+F", lambda: (self.aller("personnes"), self.page_personnes.recherche.setFocus()))):
             QShortcut(QKeySequence(seq), self, activated=f)
         for i, (cle, _, _) in enumerate(PAGES):
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda k=cle: self.aller(k))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self.page_lecteur, activated=self.page_lecteur.basculer)
+        if self.kiosque:
+            QShortcut(QKeySequence("Ctrl+Alt+Shift+Q"), self, activated=self.quitter_kiosque)
+
+    def _basculer_plein_ecran(self):
+        if self.kiosque:  # le kiosque reste toujours en plein écran
+            self.showFullScreen()
+        elif self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def quitter_kiosque(self):
+        """Ctrl+Alt+Maj+Q : demande le code administrateur, puis quitte le mode kiosque."""
+        if not kiosque.code_defini():
+            self.toast("Aucun code administrateur : relancez « sudo bash kiosque.sh code ».", "erreur")
+            return
+        d = DialogueKiosque(self)
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.cfg_journal_kiosque("Sortie du mode kiosque (administrateur)")
+        kiosque.marquer_sortie()
+        self._sortie_kiosque = True
+        self.close()
+
+    def cfg_journal_kiosque(self, texte):
+        try:
+            self.base.ajouter_action("Kiosque", "alerte", texte, None)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _geometrie(self):
         g = self.cfg.fenetre
@@ -745,6 +830,11 @@ class FenetrePrincipale(QMainWindow):
 
     def redemarrer(self):
         import subprocess
+        if self.kiosque:  # la session kiosque relance Flux elle-même (pas de deuxième Flux en parallèle)
+            self._sortie_kiosque = True
+            self.arret_propre()
+            QApplication.exit(kiosque.CODE_REDEMARRER)
+            return
         self.arret_propre()
         script = os.path.join(RACINE, "flux.py")
         executable = sys.executable
@@ -910,6 +1000,11 @@ class FenetrePrincipale(QMainWindow):
 
     # --- fermeture ------------------------------------------------------------------------------
     def closeEvent(self, e):
+        if self.kiosque and not self._sortie_kiosque:
+            e.ignore()
+            self.showFullScreen()
+            self.toast("Mode kiosque : Flux ne peut pas être fermé.", "info")
+            return
         self.arret_propre()
         e.accept()
 
@@ -951,7 +1046,10 @@ def main():
     def ouvrir(base, info):
         fen = FenetrePrincipale(cfg, base, info)
         garde["fenetre"] = fen
-        fen.show()
+        if kiosque.actif():
+            fen.showFullScreen()
+        else:
+            fen.show()
         return fen
 
     if cfg.get("apparence.ecran_demarrage"):
