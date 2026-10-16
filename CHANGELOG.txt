@@ -1,3 +1,17 @@
+Beta Version 0.9.5 alpha
++ Ajouts
+  - Mode kiosque pour Linux (kiosque.sh) : le PC démarre directement sur Flux, en plein écran, sans
+    bureau ni barre des tâches. Idéal pour un poste de surveillance dédié (mini-PC Minisforum…).
+    - Flux ne peut pas être fermé (croix et Alt+F4 bloqués) ; il se relance tout seul s'il plante
+      ou après une mise à jour.
+    - L'écran et le PC ne se mettent jamais en veille.
+    - Sortie : Ctrl+Alt+Maj+Q puis le code administrateur (3 essais, tentatives notées dans le
+      Journal). Le code est enregistré chiffré (empreinte), jamais en clair.
+    - Options : redémarrage automatique chaque nuit (--redemarrage 4), blocage des terminaux
+      Ctrl+Alt+F1…F6 (--verrouiller).
+    Activer :  sudo bash kiosque.sh activer      Désactiver :  sudo bash kiosque.sh desactiver
+    Fonctionne avec Linux Mint (LightDM) et Ubuntu (GDM). Détails dans LISEZMOI-LINUX.txt.
+
 Beta Version 0.9.4 alpha
 + Ajouts
   - Nouvelle page « Fréquentation » : carte de chaleur (heatmap) qui montre où les personnes se

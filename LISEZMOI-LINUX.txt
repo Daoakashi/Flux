@@ -1,4 +1,4 @@
-FLUX 0.7.0 alpha — Surveillance vidéo intelligente
+FLUX 0.9.5 alpha — Surveillance vidéo intelligente
 Dépôt officiel et mises à jour : https://github.com/Daoakashi/Flux
 ==================================================
 
