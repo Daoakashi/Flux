@@ -1,3 +1,15 @@
+Beta Version 0.9.3 alpha
+* Bug résolus
+  - Animaux pris pour des personnes (surtout la nuit, en infrarouge) : chiens, chats, oiseaux,
+    chevaux… ne déclenchent plus d'apparition, d'alerte ni de vidéo.
+    - Le modèle cherche aussi les animaux : une « personne » au même endroit qu'un animal est écartée.
+    - Chaque nouvelle personne est revérifiée de près avant d'être confirmée ; si c'est un animal,
+      le journal note « Animal ignoré (chien) ».
+    - Une nouvelle personne n'est confirmée qu'après au moins une détection sûre (confiance 55 %) :
+      une silhouette douteuse n'est plus ni comptée ni encadrée.
+    Réglages › Détection : « Ignorer les animaux » (activé), « Confiance pour confirmer une
+    personne » (55 %), « Taille minimale d'une personne » (désactivée, réglage avancé).
+
 Beta Version 0.9.2 alpha
 + Ajouts
   - Flou des têtes (Réglages › Confidentialité, option à cocher, désactivée par défaut) : les têtes

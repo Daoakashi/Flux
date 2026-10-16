@@ -19,6 +19,10 @@ import numpy as np
 from .config import DOSSIER_MODELES, niveau_effectif
 
 CLASSES_VEHICULES = (2, 3, 5, 7)  # voiture, moto, bus, camion (COCO)
+# oiseau, chat, chien, cheval, mouton, vache, éléphant, ours, zèbre, girafe (COCO)
+CLASSES_ANIMAUX = (14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+NOMS_ANIMAUX = {14: "oiseau", 15: "chat", 16: "chien", 17: "cheval", 18: "mouton", 19: "vache", 20: "éléphant",
+                21: "ours", 22: "zèbre", 23: "girafe"}
 NOMS_VEHICULES = {2: "Voiture", 3: "Moto", 5: "Bus", 7: "Camion"}
 EXPRESSIONS_FR = {
     "Anger": "Colère", "Contempt": "Mépris", "Disgust": "Dégoût", "Fear": "Peur",
@@ -640,6 +644,7 @@ class Piste:
         self.id = Piste._compteur
         self.box = list(box)
         self.conf = conf
+        self.conf_max = conf  # meilleure confiance vue sur cette piste
         self.debut = t
         self.vue = t
         self.vues = 1
@@ -656,6 +661,7 @@ class Piste:
         self.alerte_liste_noire = None  # id de la fiche déjà signalée (liste noire)
         self.meilleur_visage = None  # (taille, embedding, miniature)
         self.inconnu_cree = False
+        self.animal = None  # None = pas encore vérifié ; sinon nom de l'animal (fausse personne écartée) ou ""
 
     def distance(self):
         d = 0.0
@@ -696,6 +702,7 @@ class Traqueur:
                     p.immobile_depuis = t
                     p.stationnement_signale = False
                 p.box, p.conf, p.vue = list(box), conf, t
+                p.conf_max = max(getattr(p, "conf_max", conf), conf)
                 p.vues += 1
                 p.centres.append((cx, cy, t))
                 if len(p.centres) > 300:
@@ -867,13 +874,63 @@ class Pipeline:
         return boites, scores, cls
 
     # --- analyse principale --------------------------------------------------------------
+    # --- animaux ------------------------------------------------------------------------------
+    @staticmethod
+    def _ecarter_animaux(personnes, boites, scores, cls):
+        """Retire les « personnes » qui sont en fait un animal détecté au même endroit (même analyse)."""
+        animaux = [(boites[i], scores[i]) for i, k in enumerate(cls) if k in CLASSES_ANIMAUX]
+        if not animaux:
+            return personnes
+        gardees = []
+        for p in personnes:
+            aire_p = max(1.0, (p[2] - p[0]) * (p[3] - p[1]))
+            ecartee = False
+            for b, s in animaux:
+                if s < 0.7 * p[4]:
+                    continue
+                inter = max(0.0, min(p[2], b[2]) - max(p[0], b[0])) * max(0.0, min(p[3], b[3]) - max(p[1], b[1]))
+                aire_a = max(1.0, (b[2] - b[0]) * (b[3] - b[1]))
+                if inter / (aire_p + aire_a - inter) >= 0.4 or inter / min(aire_p, aire_a) >= 0.75:
+                    ecartee = True
+                    break
+            if not ecartee:
+                gardees.append(p)
+        return gardees
+
+    def _verifier_animal(self, frame, box):
+        """Deuxième avis sur une nouvelle personne : le modèle réexamine le recadrage, agrandi, avec toutes les
+        classes. Renvoie le nom de l'animal s'il l'emporte sur « personne », sinon "". Une fois par piste."""
+        try:
+            H, W = frame.shape[:2]
+            x1, y1, x2, y2 = (int(v) for v in box[:4])
+            mx, my = int((x2 - x1) * 0.2), int((y2 - y1) * 0.2)
+            crop = frame[max(0, y1 - my):min(H, y2 + my), max(0, x1 - mx):min(W, x2 + mx)]
+            if crop.size == 0 or min(crop.shape[:2]) < 16:
+                return ""
+            r = self._predire([crop], [0, *CLASSES_ANIMAUX])[0]
+            meilleur_p, meilleur_a, nom = 0.0, 0.0, ""
+            ch, cw = crop.shape[:2]
+            for b, s, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(), r.boxes.cls.tolist()):
+                if (b[2] - b[0]) * (b[3] - b[1]) < 0.25 * cw * ch:
+                    continue  # autre objet, trop petit pour être celui qu'on vérifie
+                k = int(k)
+                if k == 0:
+                    meilleur_p = max(meilleur_p, s)
+                elif k in CLASSES_ANIMAUX and s > meilleur_a:
+                    meilleur_a, nom = s, NOMS_ANIMAUX.get(k, "animal")
+            return nom if meilleur_a >= 0.3 and meilleur_a >= 0.9 * meilleur_p else ""
+        except Exception:  # noqa: BLE001  — en cas de doute, on garde la personne
+            return ""
+
     def analyser(self, frame, t=None):
         t = time.time() if t is None else t
         debut = time.time()
         h, w = frame.shape[:2]
         self._zs = zones_options(self.o)
         veut_plaques = bool(self.o.get("plaques"))
-        classes = [0] + (list(CLASSES_VEHICULES) if veut_plaques else [])
+        sans_animaux = bool(self.cfg.get("detection.ignorer_animaux"))
+        classes = [0] + (list(CLASSES_VEHICULES) if veut_plaques else []) + (
+            list(CLASSES_ANIMAUX) if sans_animaux else [])
 
         # Basse lumière
         mode = self.cfg.get("basse_lumiere.mode")
@@ -907,6 +964,11 @@ class Pipeline:
                     personnes.append((x1, y1, x2, y2, float(scores[i])))
                 elif veut_plaques:
                     vehicules.append((x1, y1, x2, y2, float(scores[i]), groupe))
+        if sans_animaux:
+            personnes = self._ecarter_animaux(personnes, boites, scores, cls)
+        taille_min = float(self.cfg.get("detection.taille_min_personne") or 0) / 100.0
+        if taille_min > 0:  # trop petit pour être une personne à cet endroit (chat, oiseau au loin…)
+            personnes = [p for p in personnes if (p[3] - p[1]) >= taille_min * h]
 
         source_visages = amelioree if amelioree is not None else frame
         visages = self._analyser_visages(source_visages, w, h) if (
@@ -914,6 +976,14 @@ class Pipeline:
         plaques = self._analyser_plaques(frame, vehicules, t) if veut_plaques else []
 
         pistes = self._suivre(personnes, visages, frame, t)
+        if sans_animaux:  # pistes reconnues comme animaux après vérification : plus affichées comme personnes
+            animaux = {tuple(int(v) for v in q.box[:4]) for q in self.traqueur.pistes if q.animal}
+            if animaux:
+                personnes = [p for p in personnes if tuple(int(v) for v in p[:4]) not in animaux]
+        seuil_sur = float(self.cfg.get("detection.confiance_confirmation") or 0)
+        if seuil_sur > 0:  # silhouettes douteuses jamais confirmées : ni cadre ni compteur à l'écran
+            sures = {tuple(int(v) for v in q.box[:4]) for q in self.traqueur.pistes if q.confirmee}
+            personnes = [p for p in personnes if p[4] >= seuil_sur or tuple(int(v) for v in p[:4]) in sures]
         # Un « visage » qui n'appartient à aucune personne détectée est souvent un faux positif (main, flou) :
         # on ne le garde que s'il est très net.
         if personnes:
@@ -1140,6 +1210,16 @@ class Pipeline:
                 meilleure.meilleur_visage = (taille, v["empreinte"], v["miniature"], v["similarite"])
 
         for p in pistes:
+            seuil_sur = float(self.cfg.get("detection.confiance_confirmation") or 0)
+            if not p.confirmee and p.vues >= confirmation and p.conf_max < seuil_sur:
+                continue  # silhouette encore douteuse (animal, ombre…) : on attend une détection plus sûre
+            if not p.confirmee and p.vues >= confirmation and self.cfg.get("detection.ignorer_animaux"):
+                if p.animal is None:  # une seule vérification par piste, au moment de la confirmer
+                    p.animal = self._verifier_animal(frame, p.box)
+                    if p.animal:
+                        self.emettre(f"Animal ignoré ({p.animal}) : pas compté comme une personne", "info")
+                if p.animal:
+                    continue
             if not p.confirmee and p.vues >= confirmation:
                 p.confirmee = True
                 self._action(p, "apparition", "Apparition", frame, enregistrer)

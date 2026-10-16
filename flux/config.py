@@ -166,6 +166,19 @@ SCHEMA = [
       "Seuil au-delà duquel deux cadres qui se chevauchent sont fusionnés.", None, 0.2, 0.9, 0.05, "", True),
     R("detection.une_image_sur", "detection", "Analyser une image sur", "int", 1,
       "Augmentez pour soulager la machine avec beaucoup de caméras.", None, 1, 15, 1),
+    R("detection.ignorer_animaux", "detection", "Ignorer les animaux", "bool", True,
+      "Chiens, chats, oiseaux, chevaux… ne sont plus comptés comme des personnes : le modèle cherche aussi les "
+      "animaux et écarte une « personne » qui est en fait un animal, puis revérifie chaque nouvelle personne de près "
+      "avant de la confirmer (utile la nuit, où un animal ressemble plus facilement à une silhouette)."),
+    R("detection.confiance_confirmation", "detection", "Confiance pour confirmer une personne", "float", 0.55,
+      "Une nouvelle personne n'est confirmée (journal, alerte, vidéo) qu'après au moins une détection à ce niveau "
+      "de confiance. Les animaux et les ombres pris pour des personnes restent en dessous ; une vraie personne le "
+      "dépasse presque toujours en quelques images. Mettez la même valeur que « Confiance minimale » pour "
+      "désactiver.", None, 0.10, 0.95, 0.05),
+    R("detection.taille_min_personne", "detection", "Taille minimale d'une personne", "int", 0,
+      "En % de la hauteur de l'image. Écarte les détections trop petites pour être une personne à cet endroit "
+      "(chat, oiseau). 0 = désactivé. Attention : une valeur trop haute fait rater les personnes lointaines.",
+      None, 0, 40, 1, " %", True),
     R("detection.confirmation", "detection", "Analyses pour confirmer une personne", "int", 2,
       "Évite les fausses alertes dues à une détection isolée.", None, 1, 10, 1),
     R("detection.delai_absence", "detection", "Délai avant « départ »", "float", 3.0, "", None, 0.5, 60, 0.5, " s"),
