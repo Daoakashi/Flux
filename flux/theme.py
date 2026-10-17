@@ -135,6 +135,8 @@ def feuille_de_style():
     QComboBox QAbstractItemView {{ background: {C['surface']}; border: 1px solid {C['trait']}; padding: 4px;
         selection-background-color: {C['selection']}; selection-color: {C['texte']}; outline: 0; }}
     QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; }}
+    QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{ background: transparent; border: none; padding: 0; margin: 0;
+        min-height: 0; }}
     QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
     QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
     QScrollBar::handle {{ background: {C['trait']}; border-radius: 4px; min-height: 28px; min-width: 28px; }}
@@ -423,6 +425,13 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.lineTo(13.5, 18.3)
         pp.moveTo(19.5, 7)
         pp.cubicTo(20.8, 8.5, 20.8, 11.5, 19.5, 13)
+    elif nom == "panneau":  # fenêtre avec une colonne à droite : afficher / masquer le panneau des options
+        pp.addRoundedRect(QRectF(3, 4.5, 18, 15), 2.5, 2.5)
+        pp.moveTo(14.5, 4.5)
+        pp.lineTo(14.5, 19.5)
+        for yy in (8.5, 11.5, 14.5):
+            pp.moveTo(16.8, yy)
+            pp.lineTo(18.6, yy)
     elif nom == "outil_rect":
         pp.addRoundedRect(QRectF(4.5, 6.5, 15, 11), 1.5, 1.5)
         p.drawPath(pp)

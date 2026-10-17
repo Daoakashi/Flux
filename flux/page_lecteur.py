@@ -164,11 +164,17 @@ class PageLecteur(QWidget):
         self.volume.setValue(self.cfg.get("lecteur.volume"))
         self.volume.valueChanged.connect(self._volume)
         ctl.addWidget(self.volume)
+        self.b_panneau = Bouton("", "discret", "panneau")
+        self.b_panneau.clicked.connect(
+            lambda: self.cfg.set("apparence.panneau_options", not self.cfg.get("apparence.panneau_options")))
+        ctl.addWidget(self.b_panneau)
         gauche.addLayout(ctl)
         corps.addLayout(gauche, 1)
 
         col_w = QWidget()
-        col_w.setFixedWidth(300)
+        self.col_options = col_w
+        col_w.setMinimumWidth(240)
+        col_w.setMaximumWidth(320)
         col = QVBoxLayout(col_w)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
@@ -212,6 +218,18 @@ class PageLecteur(QWidget):
         col.addWidget(self.lbl_analyse)
         corps.addWidget(col_w)
         v.addLayout(corps, 1)
+
+    def appliquer_disposition(self):
+        """Panneau des options masquable (bouton, Ctrl+B, Réglages › Apparence) ; masqué tout seul si la fenêtre est
+        trop étroite pour lui laisser de la place à côté de la vidéo."""
+        voulu = bool(self.cfg.get("apparence.panneau_options"))
+        self.col_options.setVisible(voulu and self.width() >= 700)
+        self.b_panneau.definir_style("discret" if voulu else "primaire")
+        self.b_panneau.setToolTip(("Masquer" if voulu else "Afficher") + " le panneau des options (Ctrl+B)")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.appliquer_disposition()
 
     # --- ouverture ------------------------------------------------------------------------
     def _statut(self, texte, erreur=False):

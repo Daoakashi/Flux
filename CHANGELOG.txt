@@ -9,7 +9,21 @@ Beta Version 0.9.6 alpha
   - Téléchargements séparés : une archive pour Windows (Flux-x.y.z-windows.zip) et une pour Linux
     (Flux-x.y.z-linux.zip), chacune avec seulement ses propres scripts. Les mises à jour prennent
     automatiquement celle du système. « Préparer une publication » crée les deux.
+  - Affichage :
+    - le panneau des options d'une caméra se masque d'un clic (bouton en haut à droite de la caméra,
+      ou Ctrl+B) : la vidéo prend toute la place ;
+    - Réglages › Apparence › Options des caméras : à droite, à gauche, sous la vidéo ou
+      Automatique ; la séparation se déplace à la souris ;
+    - Réglages › Apparence › Taille de l'interface : de 80 à 200 % (petit écran de portable, écran 4K).
 * Bug résolus
+  - Affichage sur les petits écrans et avec l'agrandissement de Windows (125 %, 150 %) : la fenêtre
+    dépassait de l'écran, les pastilles (Détection, Visages…) et le nom de la caméra étaient coupés,
+    le panneau des options avait une largeur fixe. Maintenant :
+    - la fenêtre s'ouvre toujours dans l'écran et descend jusqu'à 760 × 520 ;
+    - la barre latérale se réduit toute seule quand la fenêtre est étroite ;
+    - les pastilles passent sur une seconde ligne et le nom de la caméra se raccourcit avec « … » ;
+    - les panneaux du Lecteur, de Fréquentation et des Réglages s'adaptent à la largeur.
+  - Réglages : les champs chiffrés (Taille du texte, Arrondi des angles…) s'affichaient vides.
   - Dossier « Flux » en double dans le dépôt (copie de l'archive envoyée par erreur) retiré.
 
 Beta Version 0.9.5 alpha

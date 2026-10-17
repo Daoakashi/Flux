@@ -124,7 +124,20 @@ SCHEMA = [
     R("apparence.vitesse_animations", "apparence", "Vitesse des animations", "float", 1.0,
       "1 = normal, 0,5 = deux fois plus rapide, 2 = deux fois plus lent.", None, 0.4, 2.5, 0.1, " ×"),
     R("apparence.barre_compacte", "apparence", "Barre latérale réduite", "bool", False,
-      "N'affiche que les icônes dans la barre de navigation."),
+      "N'affiche que les icônes dans la barre de navigation. Elle se réduit aussi toute seule quand la fenêtre est "
+      "étroite."),
+    R("apparence.disposition", "apparence", "Options des caméras", "choix", "auto",
+      "Place du panneau des réglages de chaque caméra (source, niveau de scan, zones). Automatique : à droite si la "
+      "fenêtre est assez large, sinon sous la vidéo.",
+      [("auto", "Automatique"), ("droite", "À droite"), ("gauche", "À gauche"), ("dessous", "Sous la vidéo")]),
+    R("apparence.panneau_options", "apparence", "Afficher le panneau des options", "bool", True,
+      "Se change aussi avec le bouton en haut à droite de chaque caméra, ou Ctrl+B : la vidéo prend alors toute la "
+      "place."),
+    R("apparence.echelle", "apparence", "Taille de l'interface", "choix", "auto",
+      "Agrandit ou réduit toute la fenêtre : utile sur un petit écran d'ordinateur portable (90 %) ou un écran 4K "
+      "(125 à 150 %). Prend effet au prochain démarrage de Flux.",
+      [("auto", "Automatique (réglage du système)"), ("0.8", "80 %"), ("0.9", "90 %"), ("1", "100 %"),
+       ("1.1", "110 %"), ("1.25", "125 %"), ("1.5", "150 %"), ("1.75", "175 %"), ("2", "200 %")]),
     R("apparence.ecran_demarrage", "apparence", "Écran de démarrage", "bool", True),
     R("apparence.opacite", "apparence", "Opacité de la fenêtre", "int", 100, "", None, 70, 100, 1, " %", True),
 

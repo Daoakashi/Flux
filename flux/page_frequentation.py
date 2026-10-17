@@ -331,7 +331,8 @@ class PageFrequentation(QWidget):
 
         defil = QScrollArea()
         defil.setWidgetResizable(True)
-        defil.setFixedWidth(400)
+        defil.setMinimumWidth(300)
+        defil.setMaximumWidth(420)
         defil.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         droite = QWidget()
         dv = QVBoxLayout(droite)

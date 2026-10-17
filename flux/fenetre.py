@@ -424,7 +424,9 @@ class FenetrePrincipale(QMainWindow):
         self._sortie_kiosque = False
         self.info_appareil = info or {}
         self.setWindowIcon(icone_application())
-        self.setMinimumSize(1100, 700)
+        # Assez petit pour un portable 1366 × 768 agrandi à 125-150 % : les pages s'adaptent (barre réduite,
+        # options sous la vidéo, barres d'outils sur deux lignes).
+        self.setMinimumSize(760, 520)
         self.evenements = queue.Queue()
         self.mailer = Mailer(cfg, self.log_systeme)
         self.mailer.start()
@@ -566,7 +568,11 @@ class FenetrePrincipale(QMainWindow):
         self._compacter()
 
     def _compacter(self):
-        compact = bool(self.cfg.get("apparence.barre_compacte"))
+        # Réduite si demandé, ou toute seule quand la fenêtre est étroite (petit écran, agrandissement du système)
+        compact = bool(self.cfg.get("apparence.barre_compacte")) or self.width() < 1180
+        if getattr(self, "_barre_compacte", None) == compact:
+            return
+        self._barre_compacte = compact
         for b in list(self.nav.values()) + self.boutons_bas:
             b.compact = compact
             b.updateGeometry()
@@ -578,6 +584,8 @@ class FenetrePrincipale(QMainWindow):
                        ("Ctrl+O", lambda: (self.aller("lecteur"), self.page_lecteur.ouvrir_fichier())),
                        ("Ctrl+,", lambda: self.aller("reglages")),
                        ("F11", self._basculer_plein_ecran),
+                       ("Ctrl+B", lambda: self.cfg.set("apparence.panneau_options",
+                                                       not self.cfg.get("apparence.panneau_options"))),
                        ("Ctrl+F", lambda: (self.aller("personnes"), self.page_personnes.recherche.setFocus()))):
             QShortcut(QKeySequence(seq), self, activated=f)
         for i, (cle, _, _) in enumerate(PAGES):
@@ -614,13 +622,22 @@ class FenetrePrincipale(QMainWindow):
             pass
 
     def _geometrie(self):
+        """Taille et position mémorisées, toujours ramenées dans l'écran (petit écran, agrandissement, écran
+        débranché depuis la dernière fois)."""
         g = self.cfg.fenetre
-        if g.get("largeur"):
-            self.resize(g["largeur"], g["hauteur"])
-            if "x" in g:
-                self.move(g["x"], g["y"])
-        else:
-            self.resize(1440, 900)
+        ecran = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        largeur = int(g.get("largeur") or 1440)
+        hauteur = int(g.get("hauteur") or 900)
+        largeur = max(self.minimumWidth(), min(largeur, ecran.width()))
+        hauteur = max(self.minimumHeight(), min(hauteur, ecran.height()))
+        self.resize(largeur, hauteur)
+        x, y = g.get("x"), g.get("y")
+        if x is None or y is None or not ecran.adjusted(-40, -40, 40, 40).contains(int(x) + 60, int(y) + 20):
+            x = ecran.x() + max(0, (ecran.width() - largeur) // 2)
+            y = ecran.y() + max(0, (ecran.height() - hauteur) // 2)
+        self.move(int(x), int(y))
+        if not g.get("largeur") and (ecran.width() < 1300 or ecran.height() < 760):
+            QTimer.singleShot(0, self.showMaximized)  # premier lancement sur un petit écran : plein cadre
 
     # --- navigation ---------------------------------------------------------------------
     def aller(self, cle):
@@ -680,9 +697,18 @@ class FenetrePrincipale(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "toasts"):
             self.toasts.replacer()
+        if all(hasattr(self, a) for a in ("nav", "boutons_bas", "lbl_marque", "barre")):
+            self._compacter()
 
     # --- réglages -----------------------------------------------------------------------
     def _reglage_change(self, cle, valeur):
+        if cle in ("apparence.disposition", "apparence.panneau_options"):
+            self.page_cameras.appliquer_disposition()
+            self.page_lecteur.appliquer_disposition()
+            return
+        if cle == "apparence.echelle":
+            self.toast("Taille de l'interface : redémarrez Flux pour l'appliquer.")
+            return
         if cle.startswith("apparence."):
             if cle == "apparence.opacite":
                 self.setWindowOpacity(valeur / 100)
@@ -1027,6 +1053,10 @@ class FenetrePrincipale(QMainWindow):
 
 def main():
     cfg = Config()
+    echelle = str(cfg.get("apparence.echelle") or "auto")
+    if echelle != "auto" and not os.environ.get("QT_SCALE_FACTOR"):
+        # Taille de l'interface choisie dans Réglages › Apparence : multiplie l'agrandissement du système
+        os.environ["QT_SCALE_FACTOR"] = echelle
     if os.name == "nt":  # icône correcte dans la barre des tâches Windows
         try:
             import ctypes

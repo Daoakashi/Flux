@@ -6,10 +6,11 @@ from urllib.parse import unquote, urlparse
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QListWidget,
-                               QListWidgetItem, QMenu, QMessageBox, QScrollArea, QStackedWidget, QTabBar, QVBoxLayout,
+                               QListWidgetItem, QMenu, QMessageBox, QScrollArea, QSplitter, QStackedWidget, QTabBar,
+                               QVBoxLayout,
                                QWidget)
 
 from . import onvif
@@ -18,7 +19,7 @@ from .sources import Detecteur, dessiner, est_lien_web, slug
 from .page_groupes import DialogueGroupe, PageGroupe  # noqa: F401
 from .taches import en_arriere_plan
 from .vision import copie_zone, point_dans_zone, zones_options
-from .widgets import (Bouton, BoutonX, Interrupteur, OutilsZone, Pastille, Repliable, VueVideo, Voyant, etiquette, ligne_option,
+from .widgets import (Bouton, BoutonX, Interrupteur, LabelElide, OutilsZone, Pastille, Repliable, VueVideo, Voyant, etiquette, ligne_option,
                       separateur)
 
 CHOIX_NIVEAUX = [("global", "Réglage global")] + [(k, v["nom"]) for k, v in NIVEAUX.items()] + [
@@ -101,24 +102,38 @@ class PageFlux(QWidget):
     def _construire(self, source):
         racine = QHBoxLayout(self)
         racine.setContentsMargins(0, 10, 0, 0)
-        racine.setSpacing(18)
+        racine.setSpacing(0)
+        # Vidéo et panneau des options dans un séparateur : à droite, à gauche ou sous la vidéo (Réglages ›
+        # Apparence), largeur réglable à la souris, panneau masquable (bouton en haut à droite ou Ctrl+B).
+        self.separateur = QSplitter(Qt.Orientation.Horizontal)
+        self.separateur.setChildrenCollapsible(False)
+        self.separateur.setHandleWidth(14)
+        racine.addWidget(self.separateur)
+        self._mode = None
 
-        gauche = QVBoxLayout()
+        self.w_video = QWidget()
+        gauche = QVBoxLayout(self.w_video)
+        gauche.setContentsMargins(0, 0, 0, 0)
         gauche.setSpacing(12)
         entete = QHBoxLayout()
         entete.setSpacing(10)
+        self._entete = entete
         self.voyant = Voyant(14)
         entete.addWidget(self.voyant)
         bloc = QVBoxLayout()
         bloc.setSpacing(0)
-        self.titre = QLabel(self.nom)
+        self.titre = LabelElide(self.nom)
         self.titre.setObjectName("titre")
-        self.sous_titre = QLabel("Arrêté")
+        self.sous_titre = LabelElide("Arrêté")
         self.sous_titre.setObjectName("soustitre")
         bloc.addWidget(self.titre)
         bloc.addWidget(self.sous_titre)
-        entete.addLayout(bloc)
-        entete.addStretch(1)
+        entete.addLayout(bloc, 1)
+        # Pastilles et boutons : sur la ligne du titre si la place suffit, sinon sur une seconde ligne
+        self.outils = QWidget()
+        ho = QHBoxLayout(self.outils)
+        ho.setContentsMargins(0, 0, 0, 0)
+        ho.setSpacing(10)
         self.p_detection = Pastille("Détection", "o_personne")
         self.p_detection.setToolTip("Analyse de cette caméra (personnes, alertes). Désactivée : l'image reste "
                                     "affichée, sans alerte ni notification.")
@@ -129,27 +144,38 @@ class PageFlux(QWidget):
         self.p_expr.setToolTip("Reconnaître l'expression de chaque visage (active aussi les visages)")
         self.p_plaques.setToolTip("Détecter les véhicules et leurs plaques d'immatriculation")
         for w in (self.p_detection, self.p_visages, self.p_expr, self.p_plaques):
-            entete.addWidget(w)
+            ho.addWidget(w)
         b_capture = Bouton("", "discret", "capture")
         b_capture.setToolTip("Enregistrer une capture d'écran annotée")
         b_capture.clicked.connect(self._capture)
-        entete.addWidget(b_capture)
+        ho.addWidget(b_capture)
         b_clip = Bouton("", "discret", "video")
         b_clip.setToolTip("Enregistrer une courte vidéo maintenant (avec les secondes précédentes)")
         b_clip.clicked.connect(self._clip)
-        entete.addWidget(b_clip)
+        ho.addWidget(b_clip)
+        entete.addWidget(self.outils)
+        self.b_panneau = Bouton("", "discret", "panneau")
+        self.b_panneau.clicked.connect(
+            lambda: self.cfg.set("apparence.panneau_options", not self.cfg.get("apparence.panneau_options")))
+        entete.addWidget(self.b_panneau)
         gauche.addLayout(entete)
+        self._ligne2 = QHBoxLayout()
+        self._ligne2.setSpacing(10)
+        self._ligne2.addStretch(1)
+        gauche.addLayout(self._ligne2)
         self.video = VueVideo()
         self.video.message_vide = "Flux arrêté"
         self.video.definir_zones(self.o["zones"])
         self.video.zonesChangees.connect(self._zones_changees)
         self.video.zoneSelectionnee.connect(self._zone_choisie_sur_image)
         gauche.addWidget(self.video, 1)
-        racine.addLayout(gauche, 1)
+        self.w_video.setMinimumWidth(320)
+        self.w_video.installEventFilter(self)  # largeur changée : pastilles sur une ou deux lignes
+        self.separateur.addWidget(self.w_video)
 
         defil = QScrollArea()
         defil.setWidgetResizable(True)
-        defil.setFixedWidth(330)
+        defil.setFrameShape(QScrollArea.Shape.NoFrame)
         defil.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         contenu = QWidget()
         col = QVBoxLayout(contenu)
@@ -248,12 +274,18 @@ class PageFlux(QWidget):
         self._remplir_zones()
         col.addStretch(1)
         defil.setWidget(contenu)
-        droite = QVBoxLayout()
+        self.panneau = QWidget()
+        self.panneau.setMinimumWidth(270)
+        self.panneau.setMinimumHeight(160)
+        droite = QVBoxLayout(self.panneau)
+        droite.setContentsMargins(0, 0, 0, 0)
         droite.addWidget(defil, 1)
         b_fermer = Bouton("Fermer cette caméra", "danger")
         b_fermer.clicked.connect(lambda: self.page.fermer(self))
         droite.addWidget(b_fermer)
-        racine.addLayout(droite)
+        self.separateur.addWidget(self.panneau)
+        self.separateur.setStretchFactor(0, 1)
+        self.separateur.setStretchFactor(1, 0)
 
         self.p_detection.regler(self.o["detection"])
         self.p_visages.regler(self.o["visages"])
@@ -266,6 +298,62 @@ class PageFlux(QWidget):
         self.p_plaques.toggled.connect(self.rep_lire.ouvrir)
         self.combo_niveau.currentIndexChanged.connect(self._niveau_change)
         self._sync()
+        self.appliquer_disposition()
+
+    # --- disposition : panneau des options et barre d'outils -----------------------------------
+    def appliquer_disposition(self):
+        """Place le panneau des options selon Réglages › Apparence et la place disponible."""
+        voulu = str(self.cfg.get("apparence.disposition") or "auto")
+        mode = voulu if voulu != "auto" else ("droite" if self.width() >= 920 or not self.isVisible() else "dessous")
+        visible = bool(self.cfg.get("apparence.panneau_options"))
+        if mode != self._mode:
+            self._mode = mode
+            self.separateur.setOrientation(Qt.Orientation.Vertical if mode == "dessous" else Qt.Orientation.Horizontal)
+            premier = self.panneau if mode == "gauche" else self.w_video
+            if self.separateur.widget(0) is not premier:
+                self.separateur.insertWidget(0, premier)
+            i_video = self.separateur.indexOf(self.w_video)
+            self.separateur.setStretchFactor(i_video, 1)
+            self.separateur.setStretchFactor(1 - i_video, 0)
+            total = max(400, self.separateur.width() if mode != "dessous" else self.separateur.height())
+            panneau = 340 if mode != "dessous" else max(180, int(total * 0.38))
+            tailles = [total - panneau, panneau]
+            self.separateur.setSizes(tailles if i_video == 0 else tailles[::-1])
+        self.panneau.setVisible(visible)
+        self.b_panneau.definir_style("discret" if visible else "primaire")
+        self.b_panneau.setToolTip(("Masquer" if visible else "Afficher") + " le panneau des options (Ctrl+B)")
+        self._placer_outils()
+
+    def _placer_outils(self):
+        """Pastilles sur la ligne du titre si elles tiennent, sinon sur une seconde ligne."""
+        besoin = self.outils.sizeHint().width() + self.b_panneau.sizeHint().width() + 200
+        bas = self.w_video.width() < besoin
+        dans_entete = self._entete.indexOf(self.outils) >= 0
+        if bas and dans_entete:
+            self._entete.removeWidget(self.outils)
+            self._ligne2.insertWidget(0, self.outils)
+        elif not bas and not dans_entete:
+            self._ligne2.removeWidget(self.outils)
+            self._entete.insertWidget(self._entete.indexOf(self.b_panneau), self.outils)
+
+    def eventFilter(self, objet, e):
+        if objet is self.w_video and e.type() == e.Type.Resize:
+            QTimer.singleShot(0, self._placer_outils)
+        return super().eventFilter(objet, e)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if not getattr(self, "_disposition_prevue", False):
+            self._disposition_prevue = True
+
+            def appliquer():
+                self._disposition_prevue = False
+                self.appliquer_disposition()
+            QTimer.singleShot(0, appliquer)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        QTimer.singleShot(0, self.appliquer_disposition)
 
     # --- actions ----------------------------------------------------------------------
     def _parcourir(self):
@@ -1098,6 +1186,11 @@ class PageCameras(QWidget):
             nom, source, params = d.resultat
             page = self.ajouter(nom, source, params, demarrer=True)
             self.barre.setCurrentIndex(self._index(page))
+
+    def appliquer_disposition(self):
+        """Réglages › Apparence (place et affichage du panneau des options) : toutes les caméras ouvertes."""
+        for p in self.pages:
+            p.appliquer_disposition()
 
     def ajouter(self, nom, source, params=None, demarrer=False):
         page = PageFlux(self, self._nom_unique(nom), source, params)

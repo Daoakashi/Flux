@@ -246,6 +246,41 @@ class BoutonX(QAbstractButton):
         p.drawLine(QPointF(c.x() - 3.2, c.y() + 3.2), QPointF(c.x() + 3.2, c.y() - 3.2))
 
 
+class LabelElide(QLabel):
+    """Texte qui se raccourcit avec « … » quand la place manque, au lieu de déborder ou de pousser les voisins."""
+
+    def __init__(self, texte="", parent=None):
+        super().__init__(parent)
+        self._plein = ""
+        self.setMinimumWidth(40)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(texte)
+
+    def setText(self, texte):
+        self._plein = str(texte or "")
+        self.setToolTip(self._plein)
+        self._elider()
+
+    def text(self):
+        return self._plein
+
+    def sizeHint(self):
+        return QSize(self.fontMetrics().horizontalAdvance(self._plein) + 6, super().sizeHint().height())
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._elider()
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (e.Type.FontChange, e.Type.StyleChange):
+            self._elider()
+
+    def _elider(self):
+        QLabel.setText(self, self.fontMetrics().elidedText(self._plein, Qt.TextElideMode.ElideRight,
+                                                           max(12, self.width())))
+
+
 class Voyant(QWidget):
     """Témoin d'état : arrêt, direct, chargement, alerte (pulsation)."""
 
