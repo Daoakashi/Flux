@@ -1,0 +1,42 @@
+# Bouton « Publier une version » : onglet Actions du dépôt › Publier une version de Flux › Run workflow.
+# Avant : mettez à jour version.json et ajoutez les notes en haut de CHANGELOG.txt.
+# Résultat : une « release » GitHub avec deux archives, Flux-x.y.z-windows.zip et Flux-x.y.z-linux.zip. Chaque PC
+# Flux prend celle de son système
+# (Réglages › Mises à jour) et le site affiche un bouton par système dans la page Télécharger.
+name: Publier une version de Flux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lire la version et les notes
+        id: v
+        run: python3 .github/scripts/preparer_version.py
+
+      - name: Vérifier que la version n'existe pas déjà
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::La version ${{ steps.v.outputs.tag }} est déjà publiée. Augmentez le numéro dans version.json."
+            exit 1
+          fi
+
+      - name: Créer les archives Windows et Linux
+        run: python3 .github/scripts/archives.py
+
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.v.outputs.tag }}" Flux-*-windows.zip Flux-*-linux.zip \
+            --title "${{ steps.v.outputs.titre }}" --notes-file notes.md --target "${{ github.sha }}" \
+            ${{ steps.v.outputs.prerelease }}

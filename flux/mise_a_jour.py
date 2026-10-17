@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from . import config
+from . import config, plateformes
 
 API = os.environ.get("FLUX_GITHUB_API", "https://api.github.com")
 BRUT = os.environ.get("FLUX_GITHUB_BRUT", "https://raw.githubusercontent.com")
@@ -133,7 +133,10 @@ def verifier(cfg):
             cle = cle[:3] + (1,)  # pré-version sans canal dans le nom : traitée comme beta
         if not canal_accepte(cfg, cle[3]):
             continue
-        archive = next((a for a in r.get("assets", []) if a.get("name", "").lower().endswith(".zip")), None)
+        # Archive de ce système (Windows ou Linux), sinon une archive commune (versions d'avant 0.9.6)
+        zips = [a for a in r.get("assets", []) if a.get("name", "").lower().endswith(".zip")]
+        archive = next((a for a in zips if plateformes.plateforme_archive(a["name"]) == plateformes.actuelle()), None) \
+            or next((a for a in zips if plateformes.plateforme_archive(a["name"]) is None), None)
         candidates.append({
             "cle": cle, "version": nom.lstrip("vV"), "titre": r.get("name") or nom, "notes": r.get("body") or "",
             "page": r.get("html_url") or f"https://github.com/{d}/releases",
@@ -261,17 +264,29 @@ def installer(cfg, info, racine=config.RACINE, progression=None):
 
 
 def preparer_publication(racine=config.RACINE):
-    """Crée publication/Flux-<version>.zip prêt à joindre à une release GitHub (sans données ni environnement)."""
+    """Crée dans « publication » une archive par système (Flux-<version>-windows.zip et -linux.zip), prêtes à
+    joindre à une release GitHub : sans données ni environnement, chacune avec seulement ses propres scripts."""
     v = config.lire_version()
     dossier = os.path.join(racine, "publication")
     os.makedirs(dossier, exist_ok=True)
-    chemin = os.path.join(dossier, f"Flux-{v['version']}{'-' + v['canal'] if v['canal'] != 'stable' else ''}.zip")
-    with zipfile.ZipFile(chemin, "w", zipfile.ZIP_DEFLATED) as z:
-        for d, sous, fichiers in os.walk(racine):
-            rel_d = os.path.relpath(d, racine)
-            sous[:] = [s for s in sous if not _protege(os.path.normpath(os.path.join(rel_d, s)))]
-            for f in fichiers:
-                rel = os.path.normpath(os.path.join(rel_d, f))
-                if not _protege(rel) and not f.endswith((".log", ".pyc", ".tmp")):
-                    z.write(os.path.join(d, f), os.path.join("Flux", rel))
-    return chemin
+    chemins = []
+    for plateforme in plateformes.PLATEFORMES:
+        chemin = os.path.join(dossier, plateformes.nom_archive(v["version"], v["canal"], plateforme))
+        with zipfile.ZipFile(chemin, "w", zipfile.ZIP_DEFLATED) as z:
+            for d, sous, fichiers in os.walk(racine):
+                rel_d = os.path.relpath(d, racine)
+                sous[:] = [x for x in sous if not _protege(os.path.normpath(os.path.join(rel_d, x)))
+                           and not x.startswith(".")]
+                for f in fichiers:
+                    rel = os.path.normpath(os.path.join(rel_d, f))
+                    if _protege(rel) or f.endswith((".log", ".pyc", ".tmp")) or f.startswith(".") \
+                            or not plateformes.pour(rel, plateforme):
+                        continue
+                    info = zipfile.ZipInfo.from_file(os.path.join(d, f), os.path.join("Flux", rel).replace("\\", "/"))
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    if f in plateformes.EXECUTABLES:
+                        info.external_attr = (0o100755 << 16)
+                    with open(os.path.join(d, f), "rb") as src:
+                        z.writestr(info, src.read())
+        chemins.append(chemin)
+    return chemins

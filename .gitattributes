@@ -1,0 +1,6 @@
+# Fins de ligne : Windows pour les .bat, Linux pour les .sh (même envoyés depuis Windows)
+*.bat text eol=crlf
+*.sh text eol=lf
+*.py text eol=lf
+.github export-ignore
+.gitattributes export-ignore

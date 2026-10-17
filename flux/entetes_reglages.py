@@ -187,17 +187,17 @@ def entete_developpeur(page):
     v.addLayout(h2)
     v.addWidget(etiquette(
         "Publication : augmentez la version, cliquez « Préparer une publication », puis sur GitHub créez une "
-        "release avec le tag v<version> (cochez « pre-release » pour alpha et beta) et joignez le zip du dossier "
-        "« publication ». Les autres installations la proposeront au prochain démarrage."))
+        "release avec le tag v<version> (cochez « pre-release » pour alpha et beta) et joignez les deux zip du "
+        "dossier « publication » (Windows et Linux). Les autres installations la proposeront au prochain démarrage."))
     return w
 
 
 def _publication(fen):
     from .mise_a_jour import preparer_publication
 
-    def fini(chemin):
-        fen.toast(f"Archive prête : {os.path.basename(chemin)}", "ok")
-        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(chemin)))
+    def fini(chemins):
+        fen.toast("Archives prêtes : " + ", ".join(os.path.basename(c) for c in chemins), "ok")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(chemins[0])))
 
     fen._tache_pub = en_arriere_plan(preparer_publication, fini, lambda e: fen.toast(f"Publication : {e}", "erreur"))
 

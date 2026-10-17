@@ -1,3 +1,17 @@
+Beta Version 0.9.6 alpha
++ Ajouts
+  - Accès hors WiFi : FluxLite (1.2.0) et Flux Remote (1.1.0) joignent ce PC depuis n'importe où
+    (4G, autre site) par le relais Flux, sans rien ouvrir dans la box du client et sans VPN. Flux se
+    connecte lui-même au relais et prouve son identité avec sa clé ; les échanges restent chiffrés de
+    bout en bout, le relais ne voit ni les images ni les mots de passe. Page FluxLite › Accès hors
+    WiFi (voyant d'état, interrupteur). L'adresse du relais est lue sur le site de Flux, ou se choisit
+    dans Réglages › FluxLite › Adresse du relais.
+  - Téléchargements séparés : une archive pour Windows (Flux-x.y.z-windows.zip) et une pour Linux
+    (Flux-x.y.z-linux.zip), chacune avec seulement ses propres scripts. Les mises à jour prennent
+    automatiquement celle du système. « Préparer une publication » crée les deux.
+* Bug résolus
+  - Dossier « Flux » en double dans le dépôt (copie de l'archive envoyée par erreur) retiré.
+
 Beta Version 0.9.5 alpha
 + Ajouts
   - Mode kiosque pour Linux (kiosque.sh) : le PC démarre directement sur Flux, en plein écran, sans
@@ -76,12 +90,6 @@ Beta Version 0.9.1 alpha
     rectangle peut devenir déformable (et inversement) par clic droit.
   - La détection, les entrées et sorties de zone et les vignettes de zone des groupes suivent la
     forme exacte de la zone. Les photos d'alerte dessinent son contour.
-  - Accès hors WiFi : FluxLite (1.2.0) et Flux Remote (1.1.0) joignent ce PC depuis n'importe où
-    (4G, autre site) par le relais Flux, sans rien ouvrir dans la box du client et sans VPN. Flux se
-    connecte lui-même au relais et prouve son identité avec sa clé ; les échanges restent chiffrés de
-    bout en bout, le relais ne voit ni les images ni les mots de passe. Page FluxLite › Accès hors
-    WiFi (voyant d'état, interrupteur). L'adresse du relais est lue sur le site de Flux, ou se choisit
-    dans Réglages › FluxLite › Adresse du relais.
 * À savoir pour la mise à jour
   - Les zones rectangulaires déjà dessinées sont gardées telles quelles.
 
