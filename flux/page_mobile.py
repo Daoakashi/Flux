@@ -13,8 +13,8 @@ import threading
 import time
 from datetime import datetime
 
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter
+from PySide6.QtCore import QRectF, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
                                QMessageBox, QScrollArea, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -420,7 +420,7 @@ class PageFluxLite(QWidget):
             self.inter.blockSignals(False)
         elif cle == "fluxlite.port" and self.serveur.en_marche():
             self.demarrer()
-        elif cle in ("fluxlite.nom",):
+        elif cle in ("fluxlite.nom", "fluxlite.web"):
             self._rafraichir_identite()
         elif cle in ("fluxlite.relais", "fluxlite.relais_adresse"):
             # l'adresse se tape lettre par lettre : on attend une pause avant de relancer la connexion
@@ -528,6 +528,23 @@ class PageFluxLite(QWidget):
         gv.addLayout(hq)
         gv.addWidget(etiquette("Dans FluxLite, touchez « Scanner le QR code ». Le même appairage sert sur le WiFi "
                                "et hors WiFi."))
+        gv.addSpacing(6)
+        s = QLabel("INTERFACE WEB")
+        s.setObjectName("section")
+        gv.addWidget(s)
+        self.lbl_web = etiquette("", "aide")
+        self.lbl_web.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        gv.addWidget(self.lbl_web)
+        hw = QHBoxLayout()
+        self.b_web_ouvrir = Bouton("Ouvrir", "fantome", "lien")
+        self.b_web_ouvrir.setToolTip("Ouvre l'interface web de Flux dans le navigateur de ce PC.")
+        self.b_web_ouvrir.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._adresse_web(local=True))))
+        hw.addWidget(self.b_web_ouvrir)
+        self.b_web_copier = Bouton("Copier l'adresse web")
+        self.b_web_copier.clicked.connect(lambda: self._copier(self._adresse_web()))
+        hw.addWidget(self.b_web_copier)
+        hw.addStretch(1)
+        gv.addLayout(hw)
         gv.addSpacing(6)
         ligne = QHBoxLayout()
         s = QLabel("ACCÈS HORS WIFI")
@@ -648,7 +665,24 @@ class PageFluxLite(QWidget):
         port = self.cfg.get("fluxlite.port")
         return f"{ms.adresses_locales()[0]}:{port}"
 
+    def _adresse_web(self, local=False):
+        port = self.cfg.get("fluxlite.port")
+        return f"https://{'127.0.0.1' if local else ms.adresses_locales()[0]}:{port}/"
+
+    def _rafraichir_web(self):
+        actif = bool(self.cfg.get("fluxlite.web"))
+        self.b_web_ouvrir.setEnabled(actif)
+        self.b_web_copier.setEnabled(actif)
+        if not actif:
+            self.lbl_web.setText("Désactivée (Réglages › FluxLite › Interface web).")
+            return
+        self.lbl_web.setText(f"Dans le navigateur d'un PC, d'une tablette ou d'un téléphone du même réseau :\n"
+                             f"{self._adresse_web()}\n\nMêmes comptes que FluxLite. À la première visite, le "
+                             "navigateur prévient que le certificat est « non reconnu » : c'est normal, il est créé "
+                             "par ce PC. Choisissez « Avancé › Continuer » (ou « Accepter le risque »).")
+
     def _rafraichir_identite(self):
+        self._rafraichir_web()
         if self.serveur is None:
             return
         port = self.cfg.get("fluxlite.port")

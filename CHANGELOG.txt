@@ -1,3 +1,17 @@
+Beta Version 0.9.7 alpha
++ Ajouts
+  - Interface web : ouvrez https://<adresse de ce PC>:47810 dans le navigateur d'un PC, d'une
+    tablette ou d'un téléphone du même réseau (Windows, Linux, Mac, Android, iPhone), sans rien
+    installer. Mêmes comptes, mêmes caméras et mêmes droits que l'application FluxLite :
+    - connexion par mail et mot de passe, création de compte avec les conditions d'utilisation ;
+    - caméras en direct, vidéo en plein écran, alertes en temps réel avec leurs photos ;
+    - pilotage pour les comptes autorisés (détection, niveau de scan, caméras, notifications,
+      délais, enregistrement d'une vidéo) ;
+    - compte : profil, mot de passe, appareils connectés, export et suppression des données (RGPD).
+    La session est gardée dans un cookie protégé, illisible par les pages, et les requêtes venant
+    d'un autre site sont refusées. Page FluxLite › Interface web (adresse, boutons Ouvrir et Copier) ;
+    se désactive dans Réglages › FluxLite › Interface web.
+
 Beta Version 0.9.6 alpha
 + Ajouts
   - Accès hors WiFi : FluxLite (1.2.0) et Flux Remote (1.1.0) joignent ce PC depuis n'importe où

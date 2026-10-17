@@ -50,6 +50,22 @@ BLOCAGE = 15 * 60
 NIVEAUX_JOURNAL = ("alerte", "action", "video")
 RE_MAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,24}$")
 
+# Interface web (navigateur) : https://<adresse du PC>:<port>/
+DOSSIER_WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+FICHIERS_WEB = {"": ("index.html", "text/html; charset=utf-8"),
+                "app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "app.css": ("app.css", "text/css; charset=utf-8"),
+                "icone.svg": ("icone.svg", "image/svg+xml"),
+                "manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json")}
+COOKIE_WEB = "flux_web"
+ENTETES_WEB = {
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; "
+                               "connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                               "form-action 'none'",
+    "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cross-Origin-Opener-Policy": "same-origin",
+    "Strict-Transport-Security": "max-age=31536000",
+}
+
 
 class ErreurServeur(Exception):
     pass
@@ -1102,8 +1118,8 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(corps)
 
-    def json(self, donnees, code=200):
-        self._envoyer(code, json.dumps(donnees, ensure_ascii=False).encode("utf-8"))
+    def json(self, donnees, code=200, entetes=None):
+        self._envoyer(code, json.dumps(donnees, ensure_ascii=False).encode("utf-8"), entetes=entetes)
 
     def erreur(self, code, message, **extra):
         self.json({"erreur": message, **extra}, code)
@@ -1126,10 +1142,37 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def ip(self):
         return self.client_address[0]
 
+    def cookie_web(self):
+        """Jeton de session de l'interface web (cookie HttpOnly : le code de la page ne peut pas le lire)."""
+        for morceau in self.headers.get("Cookie", "").split(";"):
+            nom, _, valeur = morceau.strip().partition("=")
+            if nom == COOKIE_WEB:
+                return valeur.strip()
+        return ""
+
+    def entete_cookie(self, jeton, duree):
+        return {"Set-Cookie": f"{COOKIE_WEB}={jeton}; Path=/; Max-Age={int(duree)}; Secure; HttpOnly; "
+                              "SameSite=Strict"}
+
+    def jeton_requete(self):
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip()
+        return self.cookie_web()
+
     def compte_connecte(self):
         """Renvoie (compte, session) ou envoie 401 et renvoie (None, None)."""
         auth = self.headers.get("Authorization", "")
         jeton = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if not jeton:
+            jeton = self.cookie_web()
+            # Protection CSRF : un autre site ne peut pas ajouter cet en-tête à une requête vers ce PC
+            if jeton and self.command not in ("GET", "HEAD") and self.headers.get("X-Flux") != "web":
+                self.erreur(403, "Requête refusée.")
+                return None, None
+            if jeton and not self.appli.r("web", True):
+                self.erreur(403, "L'interface web est désactivée sur ce PC.")
+                return None, None
         s = self.appli.comptes.session(jeton)
         if not s:
             self.erreur(401, "Session expirée : reconnectez-vous.")
@@ -1155,12 +1198,28 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._router("DELETE")
 
+    def do_HEAD(self):
+        self._router("HEAD")
+
+    def page_web(self, fichier):
+        if not self.appli.r("web", True):
+            return self.erreur(404, "L'interface web est désactivée sur ce PC (Réglages › FluxLite).")
+        nom, type_ = FICHIERS_WEB[fichier]
+        try:
+            with open(os.path.join(DOSSIER_WEB, nom), "rb") as f:
+                octets = f.read()
+        except OSError:
+            return self.erreur(404, "Interface web introuvable : réinstallez Flux.")
+        self._envoyer(200, octets, type_, ENTETES_WEB)
+
     def _router(self, methode):
         url = urllib.parse.urlsplit(self.path)
         chemin = url.path.rstrip("/")
         self.q = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query).items()}
         p = chemin.split("/")
         try:
+            if methode in ("GET", "HEAD") and chemin.lstrip("/") in FICHIERS_WEB:
+                return self.page_web(chemin.lstrip("/"))
             if not chemin.startswith("/api/v1"):
                 return self.erreur(404, "Adresse inconnue.")
             route = "/".join(p[3:])
@@ -1175,7 +1234,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                 return
             if route == "deconnexion" and methode == "POST":
                 self.appli.comptes.revoquer_session(session["id"])
-                return self.json({"ok": True})
+                return self.json({"ok": True}, entetes=self.entete_cookie("", 0) if self.cookie_web() else None)
             if route == "compte":
                 if methode == "GET":
                     return self.json(self._profil(compte, session))
@@ -1234,7 +1293,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                    "conservation_journal": int(a.r("conservation_journal", 7)),
                    # relais choisi à la main (vide = celui du site) : l'appli le retient pour l'accès hors WiFi
                    "relais": texte_adresse(a.relais.adresse_manuelle()) if a.r("relais", True) else "",
-                   "relais_actif": bool(a.r("relais", True))})
+                   "relais_actif": bool(a.r("relais", True)), "web": bool(a.r("web", True))})
 
     def inscription(self):
         a = self.appli
@@ -1292,12 +1351,19 @@ class _Gestionnaire(BaseHTTPRequestHandler):
             return self.erreur(403, "Votre compte attend la validation de votre responsable.", statut="attente")
         if c["statut"] == "suspendu":
             return self.erreur(403, "Ce compte est suspendu. Contactez votre responsable.", statut="suspendu")
+        web = d.get("web") is True
+        if web and not a.r("web", True):
+            return self.erreur(403, "L'interface web est désactivée sur ce PC.")
         appareil = str(d.get("appareil", ""))[:120]
-        jeton = a.comptes.ouvrir_session(c["id"], int(a.r("duree_session", 30)), appareil, self.ip)
+        jours = int(a.r("duree_session", 30))
+        jeton = a.comptes.ouvrir_session(c["id"], jours, appareil, self.ip)
         a.comptes.modifier_compte(c["id"], derniere_connexion=time.time(), derniere_ip=self.ip, appareil=appareil,
                                   version_app=str(d.get("version_app", ""))[:40])
         s = a.comptes.session(jeton)
-        self.json({"jeton": jeton, "compte": self._profil(a.comptes.compte(c["id"]), s)})
+        profil = self._profil(a.comptes.compte(c["id"]), s)
+        if web:  # le navigateur garde le jeton dans un cookie HttpOnly, jamais visible par le code de la page
+            return self.json({"compte": profil}, entetes=self.entete_cookie(jeton, jours * 86400))
+        self.json({"jeton": jeton, "compte": profil})
 
     # --- compte ------------------------------------------------------------------------------
     def _profil(self, c, session):
@@ -1435,7 +1501,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             self.close_connection = True
-            dernier, t_verif, jeton = None, time.time(), self.headers.get("Authorization", "")[7:].strip()
+            dernier, t_verif, jeton = None, time.time(), self.jeton_requete()
             while not self.server.arret:
                 debut = time.time()
                 if debut - t_verif > 10:  # compte suspendu, session révoquée ou caméra retirée : on coupe

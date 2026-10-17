@@ -359,6 +359,9 @@ SCHEMA = [
     R("fluxlite.port", "fluxlite", "Port", "int", 47810,
       "Port HTTPS ouvert sur ce PC, pour les téléphones du même réseau (WiFi). Hors WiFi, le relais est utilisé : "
       "rien à ouvrir dans la box.", None, 1024, 65535, 1),
+    R("fluxlite.web", "fluxlite", "Interface web (navigateur)", "bool", True,
+      "Ouvrez https://<adresse de ce PC>:<port> dans le navigateur d'un PC, d'une tablette ou d'un téléphone du même "
+      "réseau : mêmes comptes, mêmes caméras et mêmes droits que l'application FluxLite."),
     R("fluxlite.relais", "fluxlite", "Accès hors WiFi (relais)", "bool", True,
       "Les téléphones et Flux Remote joignent ce PC depuis n'importe où (4G, autre site) en passant par le relais "
       "Flux, sans rien ouvrir dans la box. Les échanges restent chiffrés de bout en bout : le relais ne voit ni les "

@@ -22,7 +22,7 @@ Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Régl
 
 ## FluxLite (application Android)
 
-Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. Activez le serveur dans la page **FluxLite**, puis scannez le QR code depuis l'application. Chaque entreprise ne voit que les caméras que vous lui attribuez. Connexion chiffrée et liée à la clé de ce PC ; la clé est conservée par les mises à jour (dossier `fluxlite`, à sauvegarder).
+Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. Activez le serveur dans la page **FluxLite**, puis scannez le QR code depuis l'application. Chaque entreprise ne voit que les caméras que vous lui attribuez. Les mêmes comptes ouvrent aussi l'**interface web** : `https://<adresse du PC>:47810` dans n'importe quel navigateur du même réseau (adresse affichée dans la page FluxLite ; à la première visite, acceptez le certificat créé par ce PC). Connexion chiffrée et liée à la clé de ce PC ; la clé est conservée par les mises à jour (dossier `fluxlite`, à sauvegarder).
 
 ## Configuration conseillée
 
