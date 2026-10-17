@@ -344,8 +344,15 @@ SCHEMA = [
     R("fluxlite.nom", "fluxlite", "Nom du serveur", "texte", "",
       "Affiché dans l'application, ex. « Surveillance Magasin Centre ». Vide = Flux suivi d'un code."),
     R("fluxlite.port", "fluxlite", "Port", "int", 47810,
-      "Port HTTPS ouvert sur ce PC. À ouvrir dans le pare-feu, et dans la box pour un accès depuis l'extérieur.",
-      None, 1024, 65535, 1),
+      "Port HTTPS ouvert sur ce PC, pour les téléphones du même réseau (WiFi). Hors WiFi, le relais est utilisé : "
+      "rien à ouvrir dans la box.", None, 1024, 65535, 1),
+    R("fluxlite.relais", "fluxlite", "Accès hors WiFi (relais)", "bool", True,
+      "Les téléphones et Flux Remote joignent ce PC depuis n'importe où (4G, autre site) en passant par le relais "
+      "Flux, sans rien ouvrir dans la box. Les échanges restent chiffrés de bout en bout : le relais ne voit ni les "
+      "images ni les mots de passe.", groupe="Accès hors WiFi"),
+    R("fluxlite.relais_adresse", "fluxlite", "Adresse du relais", "texte", "",
+      "Vide = le relais publié sur le site de Flux. Sinon, l'adresse de votre propre relais, ex. "
+      "« relais.monentreprise.be » ou « 203.0.113.5:8443 »."),
     R("fluxlite.inscription", "fluxlite", "Inscriptions depuis le téléphone", "bool", True,
       "Désactivé : seuls les comptes créés dans la page FluxLite peuvent se connecter.", groupe="Comptes"),
     R("fluxlite.validation_manuelle", "fluxlite", "Valider chaque nouveau compte", "bool", True,

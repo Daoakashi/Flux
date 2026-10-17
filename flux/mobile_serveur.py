@@ -238,10 +238,21 @@ class Identite:
             pass
         return ctx
 
-    def lien_appairage(self, adresses, port, nom):
-        """Contenu du QR code : ouvre FluxLite avec l'adresse et la clé déjà remplies."""
-        q = urllib.parse.urlencode({"h": ",".join(adresses), "p": port, "k": self.cle, "n": nom})
-        return f"fluxlite://appairer?{q}"
+    def signer(self, donnees):
+        """Signature ECDSA-SHA256 avec la clé privée du serveur (preuve d'identité auprès du relais)."""
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        with open(self.chemin_cle, "rb") as f:
+            prive = serialization.load_pem_private_key(f.read(), password=None)
+        return prive.sign(donnees, ec.ECDSA(hashes.SHA256()))
+
+    def lien_appairage(self, adresses, port, nom, relais=""):
+        """Contenu du QR code : ouvre FluxLite avec l'adresse et la clé déjà remplies.
+        relais : adresse d'un relais choisi à la main (vide = celle publiée sur le site, que l'appli lit elle-même)."""
+        d = {"h": ",".join(adresses), "p": port, "k": self.cle, "n": nom}
+        if relais:
+            d["r"] = relais
+        return f"fluxlite://appairer?{urllib.parse.urlencode(d)}"
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +600,274 @@ def miniature(jpeg, largeur=360):
 # ---------------------------------------------------------------------------
 # Serveur
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Accès hors WiFi : connexion sortante au relais Flux
+# ---------------------------------------------------------------------------
+SITE_RELAIS = "https://daoakashi.github.io/relais.json"
+PROTOCOLE_RELAIS = "FLUXRELAIS/1"
+PORT_RELAIS = 443
+DOMAINE_PREUVE = b"FLUXRELAIS-HOTE-1:"
+SILENCE_RELAIS = 90       # le relais envoie PING toutes les 25 s : sans nouvelle, on se reconnecte
+RAFRAICHIR_SITE = 6 * 3600
+
+
+class RefusRelais(Exception):
+    """Le relais refuse ce PC (clé non autorisée, preuve refusée…) : inutile de réessayer tout de suite."""
+
+
+def lire_adresse_relais(texte, port_defaut=PORT_RELAIS):
+    """« relais.exemple.be », « relais.exemple.be:8443 », « 1.2.3.4:443 », « [2001:db8::1]:443 » -> (hôte, port)."""
+    t = str(texte or "").strip()
+    for prefixe in ("https://", "http://", "fluxrelais://"):
+        if t.lower().startswith(prefixe):
+            t = t[len(prefixe):]
+    t = t.split("/")[0].strip()
+    if not t:
+        return None
+    if t.startswith("["):
+        hote, _, reste = t[1:].partition("]")
+        port = reste[1:] if reste.startswith(":") else ""
+    elif t.count(":") == 1:
+        hote, port = t.split(":")
+    else:
+        hote, port = t, ""
+    try:
+        port = int(port) if port else int(port_defaut)
+    except ValueError:
+        return None
+    if not hote or not 0 < port < 65536 or not re.fullmatch(r"[A-Za-z0-9.\-:]+", hote):
+        return None
+    return hote, port
+
+
+def texte_adresse(adresse):
+    if not adresse:
+        return ""
+    hote, port = adresse
+    hote = f"[{hote}]" if ":" in hote else hote
+    return hote if port == PORT_RELAIS else f"{hote}:{port}"
+
+
+def _lire_ligne(sock, maximum=4096):
+    """Lit une ligne octet par octet : rien n'est lu au-delà du « \\n » (la suite appartient à TLS)."""
+    octets = bytearray()
+    while len(octets) < maximum:
+        b = sock.recv(1)
+        if not b:
+            raise ConnectionError("connexion fermée par le relais")
+        if b == b"\n":
+            return octets.decode("utf-8", "replace").strip()
+        octets += b
+    raise ConnectionError("réponse du relais trop longue")
+
+
+class AgentRelais:
+    """Garde le PC Flux joignable par Internet sans ouvrir de port : connexion sortante permanente au relais.
+
+    Le relais ne fait que transmettre des octets chiffrés : chaque connexion relayée est remise au serveur HTTPS
+    de FluxLite, qui fait la poignée de main TLS avec le téléphone exactement comme sur le WiFi (clé vérifiée,
+    compte, mot de passe, droits). L'adresse IP réelle du téléphone, donnée par le relais, sert au blocage des
+    essais ratés.
+    """
+
+    def __init__(self, serveur):
+        self.serveur = serveur
+        self.etat = "arret"        # arret, recherche, connexion, connecte, erreur
+        self.message = ""
+        self.adresse = None
+        self.source = ""           # « site » ou « manuel »
+        self.connecte_depuis = None
+        self.relayees = 0
+        self._perdu_depuis = None  # pour n'annoncer dans le journal que les vraies reprises, pas chaque micro-coupure
+        self._arret = threading.Event()
+        self._fil = None
+        self._sock = None
+        self._site = None          # (adresse, heure) lue sur le site
+        self._fichier_site = os.path.join(serveur.dossier, "relais_site.json")
+
+    # --- marche / arrêt -------------------------------------------------------------------
+    def demarrer(self):
+        if self.actif:
+            return
+        self._arret = threading.Event()  # un signal d'arrêt par fil : relancer n'attend jamais l'ancien fil
+        self.etat, self.message = "recherche", "Recherche du relais…"
+        self._fil = threading.Thread(target=self._boucle, args=(self._arret,), daemon=True, name="fluxlite-relais")
+        self._fil.start()
+
+    def arreter(self):
+        self._arret.set()
+        s, self._sock = self._sock, None
+        if s is not None:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            s.close()
+        self.etat, self.message, self.connecte_depuis = "arret", "", None
+
+    def relancer(self):
+        self.arreter()
+        self.demarrer()
+
+    @property
+    def actif(self):
+        return self._fil is not None and self._fil.is_alive() and not self._arret.is_set()
+
+    # --- adresse du relais -------------------------------------------------------------------
+    def adresse_manuelle(self):
+        return lire_adresse_relais(self.serveur.r("relais_adresse", ""))
+
+    def adresse_du_site(self, forcer=False):
+        """Adresse publiée sur le site (relais.json), gardée en cache sur le disque pour démarrer sans Internet."""
+        if self._site is None:
+            try:
+                with open(self._fichier_site, encoding="utf-8") as f:
+                    d = json.load(f)
+                self._site = (lire_adresse_relais(d.get("adresse")), float(d.get("heure", 0)))
+            except (OSError, ValueError, AttributeError):
+                self._site = (None, 0.0)
+        adresse, heure = self._site
+        if forcer or time.time() - heure > RAFRAICHIR_SITE or adresse is None and time.time() - heure > 300:
+            try:
+                import urllib.request
+                with urllib.request.urlopen(SITE_RELAIS, timeout=15) as r:
+                    d = json.loads(r.read(65536).decode("utf-8"))
+                lue = lire_adresse_relais(d.get("hote") or "", d.get("port") or PORT_RELAIS) \
+                    if isinstance(d, dict) and d.get("actif", True) else None
+                self._site = (lue, time.time())
+                tmp = self._fichier_site + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"adresse": texte_adresse(lue), "heure": time.time()}, f)
+                os.replace(tmp, self._fichier_site)
+                adresse = lue
+            except Exception:  # noqa: BLE001 - site injoignable : on garde la dernière adresse connue
+                pass
+        return adresse
+
+    def trouver_adresse(self, forcer=False):
+        manuelle = self.adresse_manuelle()
+        if manuelle:
+            return manuelle, "manuel"
+        return self.adresse_du_site(forcer), "site"
+
+    # --- boucle de connexion ------------------------------------------------------------------
+    def _boucle(self, arret):
+        delai, echecs = 2.0, 0
+
+        def etat(e, message):
+            if not arret.is_set():  # un ancien fil (après relance) ne doit plus rien afficher
+                self.etat, self.message = e, message
+
+        while not arret.is_set():
+            adresse, source = self.trouver_adresse(forcer=echecs >= 3)
+            if arret.is_set():
+                break
+            self.adresse, self.source = adresse, source
+            if adresse is None:
+                etat("erreur", "Aucun relais publié sur le site pour l'instant. Indiquez l'adresse de votre relais "
+                               "dans Réglages › FluxLite.")
+                arret.wait(300)
+                continue
+            try:
+                etat("connexion", f"Connexion au relais {texte_adresse(adresse)}…")
+                self._session(adresse, arret, etat)
+                delai, echecs = 2.0, 0
+                etat("connexion", "Connexion au relais perdue, reconnexion…")
+            except RefusRelais as e:
+                etat("erreur", str(e))
+                if not arret.is_set():
+                    self.serveur.rappel(f"Relais : {e}", "erreur")
+                arret.wait(600)
+            except (OSError, ValueError) as e:
+                echecs += 1
+                etat("erreur", f"Relais injoignable ({texte_adresse(adresse)}) : {getattr(e, 'strerror', None) or e}")
+                arret.wait(delai)
+                delai = min(delai * 2, 60.0)
+            finally:
+                if not arret.is_set():
+                    self.connecte_depuis = None
+
+    def _connecter(self, adresse):
+        s = socket.create_connection(adresse, timeout=15)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        return s
+
+    def _session(self, adresse, arret, etat):
+        from .config import APP_VERSION
+        s = self._connecter(adresse)
+        if arret.is_set():
+            s.close()
+            return
+        self._sock = s
+        try:
+            spki = base64.b64encode(self.serveur.identite.spki_der()).decode()
+            nom = urllib.parse.quote(self.serveur.nom, safe="")
+            s.sendall(f"{PROTOCOLE_RELAIS} HOTE {spki} {APP_VERSION or '?'} {nom}\n".encode())
+            ligne = _lire_ligne(s)
+            if ligne.startswith("ERREUR"):
+                raise RefusRelais(ligne.split(" ", 2)[-1])
+            if not ligne.startswith("DEFI "):
+                raise ValueError("ce n'est pas un relais Flux")
+            preuve = self.serveur.identite.signer(DOMAINE_PREUVE + base64.b64decode(ligne[5:]))
+            s.sendall(b"PREUVE " + base64.b64encode(preuve) + b"\n")
+            ligne = _lire_ligne(s)
+            if ligne.startswith("ERREUR"):
+                raise RefusRelais(ligne.split(" ", 2)[-1])
+            if not ligne.startswith("OK"):
+                raise ValueError("réponse inattendue du relais")
+            etat("connecte", f"Joignable par Internet via {texte_adresse(adresse)}")
+            self.connecte_depuis = time.time()
+            if self._perdu_depuis is None or time.time() - self._perdu_depuis > 120:
+                self.serveur.rappel(f"Accès hors WiFi actif (relais {texte_adresse(adresse)}).", "info")
+            self._perdu_depuis = None
+            s.settimeout(SILENCE_RELAIS)
+            while not arret.is_set():
+                ligne = _lire_ligne(s)
+                if ligne == "PING":
+                    s.sendall(b"PONG\n")
+                elif ligne.startswith("OUVRIR "):
+                    morceaux = ligne.split(" ")
+                    if len(morceaux) >= 2:
+                        ip = morceaux[2] if len(morceaux) > 2 else "relais"
+                        threading.Thread(target=self._ouvrir, args=(adresse, morceaux[1], ip), daemon=True,
+                                         name="fluxlite-relais-session").start()
+        finally:
+            if self.connecte_depuis is not None and self._perdu_depuis is None:
+                self._perdu_depuis = time.time()
+            if self._sock is s:
+                self._sock = None
+            try:
+                s.close()
+            except OSError:
+                pass
+
+    def _ouvrir(self, adresse, session, ip):
+        """Ouvre la connexion de données demandée par le relais et la remet au serveur HTTPS."""
+        httpd = self.serveur._httpd
+        if httpd is None or not re.fullmatch(r"[A-Za-z0-9_\-]{8,64}", session):
+            return
+        try:
+            d = self._connecter(adresse)
+        except OSError:
+            return
+        try:
+            d.sendall(f"{PROTOCOLE_RELAIS} DONNEES {session}\n".encode())
+            if _lire_ligne(d, 64) != "OK":
+                raise ConnectionError("session refusée")
+        except (OSError, ConnectionError):
+            d.close()
+            return
+        self.relayees += 1
+        ip = ip if re.fullmatch(r"[0-9A-Fa-f.:]{2,45}", ip) else "relais"
+        httpd.process_request(d, (ip, 0))  # même traitement qu'une connexion du réseau local
+
+    # --- état pour l'interface ----------------------------------------------------------------
+    def resume(self):
+        return {"etat": self.etat, "message": self.message, "adresse": texte_adresse(self.adresse),
+                "source": self.source, "depuis": self.connecte_depuis, "relayees": self.relayees}
+
+
 class ServeurFluxLite:
     """Démarre et arrête le serveur HTTPS ; garde comptes, sessions et journal.
 
@@ -619,6 +898,7 @@ class ServeurFluxLite:
         self.flux_ouverts = {}  # compte_id -> nombre de flux vidéo ouverts
         self._flux_lock = threading.Lock()
         self.connectes = {}     # compte_id -> heure de la dernière requête
+        self.relais = AgentRelais(self)
         self._file_journal = queue.Queue()
         threading.Thread(target=self._boucle_journal, daemon=True, name="fluxlite-journal").start()
 
@@ -659,9 +939,23 @@ class ServeurFluxLite:
                                      name="fluxlite-serveur")
         self._fil.start()
         self.comptes.purger(int(self.r("conservation_journal", 7)))
+        if self.r("relais", True):
+            self.relais.demarrer()
         return port
 
+    def maj_relais(self):
+        """Après un changement des réglages du relais."""
+        if self.en_marche() and self.r("relais", True):
+            self.relais.relancer()
+        else:
+            self.relais.arreter()
+
+    def lien(self, adresses, port):
+        manuelle = self.relais.adresse_manuelle()
+        return self.identite.lien_appairage(adresses, port, self.nom, texte_adresse(manuelle) if manuelle else "")
+
     def arreter(self):
+        self.relais.arreter()
         h, self._httpd = self._httpd, None
         self.port_actif = None
         if h is not None:
@@ -933,11 +1227,14 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def info(self):
         a = self.appli
         self.json({"application": "Flux", "nom": a.nom, "api": VERSION_API, "version_flux": a.version_flux,
-                   "fonctions": ["pilotage", "pilotage_cameras", "niveau", "delais"],
+                   "fonctions": ["pilotage", "pilotage_cameras", "niveau", "delais", "relais"],
                    "inscription": bool(a.r("inscription", True)),
                    "validation_manuelle": bool(a.r("validation_manuelle", True)), "cgu_version": VERSION_CGU,
                    "responsable": (a.r("responsable", "") or "").strip(), "contact": (a.r("contact", "") or "").strip(),
-                   "conservation_journal": int(a.r("conservation_journal", 7))})
+                   "conservation_journal": int(a.r("conservation_journal", 7)),
+                   # relais choisi à la main (vide = celui du site) : l'appli le retient pour l'accès hors WiFi
+                   "relais": texte_adresse(a.relais.adresse_manuelle()) if a.r("relais", True) else "",
+                   "relais_actif": bool(a.r("relais", True))})
 
     def inscription(self):
         a = self.appli

@@ -358,6 +358,9 @@ class PageFluxLite(QWidget):
         self._timer.setInterval(3000)
         self._timer.timeout.connect(self._rafraichir_etat)
         self._timer.start()
+        self._timer_relais = QTimer(self)
+        self._timer_relais.setSingleShot(True)
+        self._timer_relais.timeout.connect(lambda: self.serveur and (self.serveur.maj_relais(), self._rafraichir_etat()))
 
     # --- serveur ---------------------------------------------------------------------
     def initialiser(self):
@@ -419,6 +422,14 @@ class PageFluxLite(QWidget):
             self.demarrer()
         elif cle in ("fluxlite.nom",):
             self._rafraichir_identite()
+        elif cle in ("fluxlite.relais", "fluxlite.relais_adresse"):
+            # l'adresse se tape lettre par lettre : on attend une pause avant de relancer la connexion
+            self._timer_relais.start(0 if cle == "fluxlite.relais" else 1500)
+            self.inter_relais.blockSignals(True)
+            self.inter_relais.regler(bool(self.cfg.get("fluxlite.relais")))
+            self.inter_relais.blockSignals(False)
+            self._rafraichir_identite()
+            self._rafraichir_etat()
 
     # --- appelé à chaque cycle de l'interface -----------------------------------------------
     def evenement(self, e):
@@ -502,7 +513,7 @@ class PageFluxLite(QWidget):
         b = Bouton("Copier le lien pour Flux Remote", "fantome", "lien")
         b.setToolTip("Adresse, port et clé en un seul lien : collez-le dans Flux Remote sur un autre ordinateur.")
         b.clicked.connect(lambda: self.serveur and self._copier(
-            self.serveur.identite.lien_appairage(ms.adresses_locales(), self.cfg.get("fluxlite.port"), self.serveur.nom)))
+            self.serveur.lien(ms.adresses_locales(), self.cfg.get("fluxlite.port"))))
         gv.addWidget(b, 0, Qt.AlignmentFlag.AlignLeft)
         gv.addSpacing(6)
         s = QLabel("APPAIRER UN TÉLÉPHONE")
@@ -515,9 +526,24 @@ class PageFluxLite(QWidget):
         self.lbl_adresses = etiquette("", "aide")
         hq.addWidget(self.lbl_adresses, 1)
         gv.addLayout(hq)
-        gv.addWidget(etiquette("Dans FluxLite, touchez « Scanner le QR code ». Hors de votre "
-                               "réseau (4G, autre site), ouvrez le port dans votre box ou utilisez un VPN "
-                               "(Tailscale, WireGuard), puis saisissez l'adresse publique."))
+        gv.addWidget(etiquette("Dans FluxLite, touchez « Scanner le QR code ». Le même appairage sert sur le WiFi "
+                               "et hors WiFi."))
+        gv.addSpacing(6)
+        ligne = QHBoxLayout()
+        s = QLabel("ACCÈS HORS WIFI")
+        s.setObjectName("section")
+        ligne.addWidget(s, 1)
+        self.inter_relais = Interrupteur()
+        self.inter_relais.regler(bool(self.cfg.get("fluxlite.relais")))
+        self.inter_relais.toggled.connect(lambda etat: self.cfg.set("fluxlite.relais", bool(etat)))
+        ligne.addWidget(self.inter_relais)
+        gv.addLayout(ligne)
+        self.lbl_relais = QLabel("")
+        self.lbl_relais.setWordWrap(True)
+        gv.addWidget(self.lbl_relais)
+        gv.addWidget(etiquette("Les téléphones et Flux Remote joignent ce PC depuis n'importe où (4G, autre site) "
+                               "par le relais Flux : rien à ouvrir dans la box. Les échanges restent chiffrés de bout "
+                               "en bout, le relais ne voit ni les images ni les mots de passe."))
         gv.addStretch(1)
         b = Bouton("Réglages FluxLite…", "fantome", "reglages")
         b.clicked.connect(lambda: (self.fen.aller("reglages"), self.fen.page_reglages.aller("fluxlite")))
@@ -628,7 +654,7 @@ class PageFluxLite(QWidget):
         port = self.cfg.get("fluxlite.port")
         adresses = ms.adresses_locales()
         self.lbl_cle.setText(self.serveur.identite.cle_affichee)
-        self.qr.definir(self.serveur.identite.lien_appairage(adresses, port, self.serveur.nom))
+        self.qr.definir(self.serveur.lien(adresses, port))
         self.lbl_adresses.setText(f"Nom : {self.serveur.nom}\n\nAdresse sur ce réseau :\n"
                                   + "\n".join(f"{a}:{port}" for a in adresses))
 
@@ -648,6 +674,26 @@ class PageFluxLite(QWidget):
         self.lbl_etat.setStyleSheet(f"color: {C[c]}; font-weight: 600;")
         self.lbl_serveur.setText("Les téléphones peuvent se connecter." if self.serveur and self.serveur.en_marche()
                                  else "Activez le serveur pour que les téléphones puissent se connecter.")
+        self._rafraichir_relais()
+
+    def _rafraichir_relais(self):
+        if self.serveur is None or not self.cfg.get("fluxlite.relais"):
+            texte, c = "● Désactivé : seulement sur le même réseau (WiFi).", "texte3"
+        elif not self.serveur.en_marche():
+            texte, c = "● En attente du serveur FluxLite.", "texte3"
+        else:
+            r = self.serveur.relais.resume()
+            if r["etat"] == "connecte":
+                origine = "relais du site" if r["source"] == "site" else "votre relais"
+                texte = (f"● Joignable par Internet · {origine} {r['adresse']}"
+                         + (f" · {r['relayees']} connexion(s) relayée(s)" if r["relayees"] else ""))
+                c = "succes"
+            elif r["etat"] == "erreur":
+                texte, c = f"● {r['message']}", "danger"
+            else:
+                texte, c = f"● {r['message'] or 'Connexion au relais…'}", "attention"
+        self.lbl_relais.setText(texte)
+        self.lbl_relais.setStyleSheet(f"color: {C[c]}; font-weight: 600;")
         if self.isVisible() and self.serveur is not None and not self.table.hasFocus():
             self._remplir_comptes()
 
