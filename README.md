@@ -2,11 +2,11 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Site officiel : [daoakashi.github.io](https://daoakashi.github.io)** · **Version actuelle : 0.9.6 alpha** · [Notes de version](CHANGELOG.txt)
+**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.9.6 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 
-1. Téléchargez la dernière version sur [le site](https://daoakashi.github.io/telecharger.html) ou dans [Releases](https://github.com/Daoakashi/Flux/releases) : `Flux-x.y.z-windows.zip` pour Windows, `Flux-x.y.z-linux.zip` pour Linux. Décompressez-la dans un dossier à vous.
+1. Téléchargez la dernière version sur [le site](https://daoakashi.github.io/flux-web/telecharger.html) ou dans [Releases](https://github.com/Daoakashi/Flux/releases) : `Flux-x.y.z-windows.zip` pour Windows, `Flux-x.y.z-linux.zip` pour Linux. Décompressez-la dans un dossier à vous.
 2. Lancez l'installateur de votre système :
    - **Windows** : double-clic sur `installer.bat`. Il installe Python, Microsoft Visual C++, PyTorch, les dépendances, Deno, ffmpeg et les modèles, puis crée un raccourci sur le bureau.
    - **Linux** (Linux Mint, Ubuntu, Debian) : ouvrez un terminal dans le dossier et tapez `bash installer.sh`. Il installe les paquets du système et les dépendances, puis crée une icône dans le menu et sur le bureau.

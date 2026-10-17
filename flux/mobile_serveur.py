@@ -603,7 +603,7 @@ def miniature(jpeg, largeur=360):
 # ---------------------------------------------------------------------------
 # Accès hors WiFi : connexion sortante au relais Flux
 # ---------------------------------------------------------------------------
-SITE_RELAIS = "https://daoakashi.github.io/relais.json"
+SITE_RELAIS = "https://daoakashi.github.io/flux-web/relais.json"
 PROTOCOLE_RELAIS = "FLUXRELAIS/1"
 PORT_RELAIS = 443
 DOMAINE_PREUVE = b"FLUXRELAIS-HOTE-1:"
