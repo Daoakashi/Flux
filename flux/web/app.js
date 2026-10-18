@@ -380,7 +380,9 @@
       ["6. Alertes et journal", `Les alertes et leurs photos sont conservées ${duree} jour(s) sur le serveur puis effacées. Le navigateur garde seulement les sessions ouvertes, sans aucune donnée personnelle.`],
       ["7. Sécurité", "Les échanges sont chiffrés (TLS) avec le certificat propre à chaque PC Flux. Les sessions peuvent être fermées à tout moment depuis l'onglet Compte."],
       ["8. Vos droits (RGPD)", `Vous pouvez accéder à vos données, les rectifier, les exporter, demander leur effacement, vous opposer à leur traitement ou en demander la limitation. L'onglet Compte permet d'exporter vos données et de supprimer votre compte. Pour toute autre demande, adressez-vous au responsable${contact}. Vous pouvez aussi saisir l'autorité de protection des données (APD en Belgique, CNIL en France).`],
-      ["9. Évolution", `Ces conditions peuvent évoluer ; la nouvelle version vous sera présentée et devra être acceptée pour continuer. Version ${i.cgu_version}.`],
+      ["9. Feedback", "Le bouton Feedback ouvre votre messagerie ou GitHub avec un message que vous relisez avant de l'envoyer ; rien n'est envoyé automatiquement. Il est adressé à l'éditeur (DMS Security), pas au responsable du serveur."],
+      ["10. Logiciel libre", "L'interface web fait partie de Flux, logiciel libre (GNU AGPL-3.0) fourni sans garantie, développé avec l'aide d'outils d'intelligence artificielle. Code source : github.com/Daoakashi/Flux."],
+      ["11. Évolution", `Ces conditions peuvent évoluer ; la nouvelle version vous sera présentée et devra être acceptée pour continuer. Version ${i.cgu_version}.`],
     ];
   }
   function blocCgu(info = etat.info) {
