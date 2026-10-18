@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 import shiboken6
-from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QLinearGradient, QPainter, QPainterPath, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QStackedWidget, QStatusBar, QTextBrowser, QVBoxLayout,
@@ -223,7 +223,7 @@ class APropos(QDialog):
         self.fen = fen
         ident = identite(fen.cfg)
         self.setWindowTitle(f"À propos de {ident['nom']}")
-        self.setMinimumWidth(480)
+        self.setMinimumSize(720, 540)
         v = QVBoxLayout(self)
         v.setContentsMargins(28, 26, 28, 22)
         v.setSpacing(8)
@@ -265,6 +265,11 @@ class APropos(QDialog):
         v.addSpacing(8)
         v.addWidget(etiquette("Les visages et les plaques sont des données personnelles : informez les personnes filmées "
                               "et respectez les règles de conservation applicables (RGPD)."))
+        v.addWidget(etiquette("© 2026 DMS Security · logiciel libre sous licence GNU AGPL-3.0 (textes dans le dossier "
+                              "« juridique »). Flux a été conçu et développé avec l'aide d'outils d'intelligence "
+                              "artificielle (assistant de programmation), sous la direction et la vérification de son "
+                              "auteur. Les analyses d'images tournent sur ce PC : aucune image n'est envoyée à un "
+                              "service d'IA."))
         h2 = QHBoxLayout()
         bo = Bouton("Ouvrir le dossier", "discret", "dossier")
         bo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(RACINE)))
@@ -275,6 +280,9 @@ class APropos(QDialog):
         bm = Bouton("Mises à jour", "discret")
         bm.clicked.connect(lambda: fen.verifier_mises_a_jour(manuel=True))
         h2.addWidget(bm)
+        bfb = Bouton("Feedback", "discret", "message")
+        bfb.clicked.connect(lambda: (self.accept(), fen.feedback()))
+        h2.addWidget(bfb)
         from .mise_a_jour import depot
         d = depot(fen.cfg)
         if d:
@@ -288,6 +296,7 @@ class APropos(QDialog):
         h2.addWidget(bf)
         v.addSpacing(8)
         v.addLayout(h2)
+        self.adjustSize()
 
 
     def _clic_version(self, _e):
@@ -466,6 +475,12 @@ class FenetrePrincipale(QMainWindow):
         self.appliquer_identite()
         if cfg.get("maj.auto"):
             QTimer.singleShot(4000, lambda: self.verifier_mises_a_jour(manuel=False))
+        # Flux tourne souvent des semaines sans redémarrer (kiosque, PC de magasin) : nouvelle recherche toutes les
+        # 12 heures, sans fenêtre (seulement l'indication dans la barre d'état et une notification).
+        self._timer_maj = QTimer(self)
+        self._timer_maj.setInterval(12 * 3600 * 1000)
+        self._timer_maj.timeout.connect(lambda: self.cfg.get("maj.auto") and self.verifier_mises_a_jour(periodique=True))
+        self._timer_maj.start()
         from . import clips
         self._tache_purge = Tache(clips.purger, os.path.join(cfg.dossier_sortie(), "videos"),
                                   cfg.get("clips.conservation")).lancer()
@@ -517,11 +532,16 @@ class FenetrePrincipale(QMainWindow):
         self.b_theme.clicked.connect(lambda: self.cfg.set("apparence.theme",
                                                           "clair" if self.cfg.get("apparence.theme") == "sombre" else "sombre"))
         bv.addWidget(self.b_theme)
+        b_feedback = BoutonNav("Feedback", "message")
+        b_feedback.setCheckable(False)
+        b_feedback.setToolTip("Envoyer une idée, un problème ou une question à l'éditeur de Flux")
+        b_feedback.clicked.connect(self.feedback)
+        bv.addWidget(b_feedback)
         b_info = BoutonNav("À propos", "info")
         b_info.setCheckable(False)
         b_info.clicked.connect(lambda: APropos(self).exec())
         bv.addWidget(b_info)
-        self.boutons_bas = [self.b_theme, b_info]
+        self.boutons_bas = [self.b_theme, b_feedback, b_info]
         h.addWidget(self.barre)
 
         zone = QWidget()
@@ -593,6 +613,40 @@ class FenetrePrincipale(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Space), self.page_lecteur, activated=self.page_lecteur.basculer)
         if self.kiosque:
             QShortcut(QKeySequence("Ctrl+Alt+Shift+Q"), self, activated=self.quitter_kiosque)
+            # En kiosque, un programme externe (lecteur vidéo, explorateur, navigateur) s'ouvrirait derrière la
+            # fenêtre plein écran et resterait inaccessible : Flux garde tout pour lui.
+            for schema in ("file", "http", "https"):
+                try:
+                    QDesktopServices.setUrlHandler(schema, self, "_url_kiosque")
+                except (TypeError, ValueError):  # anciennes versions de PySide6 : nom en octets
+                    QDesktopServices.setUrlHandler(schema, self, b"_url_kiosque")
+
+    @Slot(QUrl)
+    def _url_kiosque(self, url):
+        chemin = url.toLocalFile() if url.isLocalFile() else ""
+        if chemin.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm")) and os.path.isfile(chemin):
+            self.ouvrir_video(chemin)
+        else:
+            self.toast("Mode kiosque : les autres programmes (navigateur, explorateur de fichiers) ne s'ouvrent "
+                       "pas. Quittez le kiosque (Ctrl+Alt+Maj+Q) pour y accéder.", "info")
+
+    def feedback(self):
+        from .feedback import DialogueFeedback
+        DialogueFeedback(self, "Flux", module_config.libelle_version(module_config.APP_VERSION, module_config.APP_CANAL),
+                         kiosque=self.kiosque).exec()
+
+    def ouvrir_video(self, chemin):
+        """Ouvre une vidéo enregistrée dans le Lecteur de Flux (fonctionne aussi en kiosque)."""
+        from .page_lecteur import MULTIMEDIA
+        if not MULTIMEDIA:
+            if self.kiosque:
+                self.toast("Le lecteur de Flux nécessite le paquet PySide6 complet (pip install PySide6).", "erreur")
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(chemin))
+            return
+        self.aller("lecteur")
+        self.page_lecteur.champ.setText(chemin)
+        self.page_lecteur.ouvrir(chemin)
 
     def _basculer_plein_ecran(self):
         if self.kiosque:  # le kiosque reste toujours en plein écran
@@ -808,7 +862,7 @@ class FenetrePrincipale(QMainWindow):
             self.log_systeme(f"Vidéo envoyée par {', '.join(canaux)}", "info", e["source"])
 
     # --- mises à jour ----------------------------------------------------------------------
-    def verifier_mises_a_jour(self, manuel=False):
+    def verifier_mises_a_jour(self, manuel=False, periodique=False):
         from . import mise_a_jour
         if getattr(self, "_verif_maj", None) is not None:
             return
@@ -828,7 +882,11 @@ class FenetrePrincipale(QMainWindow):
                 self.st_maj.setText(f"⬆ Mise à jour {info['libelle']}")
                 self.st_maj.setStyleSheet(f"color: {C['accent_vif']}; font-weight: 600; padding: 0 6px;")
                 self.st_maj.show()
-                if manuel or info["version"] != self.cfg.get("maj.ignoree"):
+                if periodique:
+                    if info["version"] != self.cfg.get("maj.ignoree"):
+                        self.toast(f"Mise à jour {info['libelle']} disponible : cliquez sur « ⬆ Mise à jour » en bas "
+                                   "de la fenêtre.", "info")
+                elif manuel or info["version"] != self.cfg.get("maj.ignoree"):
                     DialogueMaj(self, info).exec()
             lbl = getattr(self.page_reglages, "lbl_maj", None)
             if lbl is not None:

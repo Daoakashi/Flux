@@ -32,3 +32,17 @@ Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. 
 ## Données personnelles
 
 Visages et plaques sont des données personnelles (RGPD). Informez les personnes filmées, limitez la durée de conservation et ne filmez pas au-delà de votre propriété. Flux fonctionne en local : aucune image ne quitte l'ordinateur, sauf les mails et notifications que vous configurez.
+
+## Juridique, licence et IA
+
+Flux, FluxLite, Flux Remote, l'interface web et le relais sont des logiciels libres publiés par **DMS Security** sous licence **GNU AGPL-3.0** (`LICENSE`). Tous les textes juridiques sont dans le dossier [`juridique/`](juridique/LISEZMOI.md) :
+- mentions légales et conditions de vente ;
+- conditions d'utilisation des applications ;
+- confidentialité et accord de sous-traitance RGPD ;
+- obligations du client (loi caméras), modèles de registre, d'analyse d'impact et d'affiche ;
+- règlement européen sur l'IA et licences tierces.
+
+Flux a été conçu et développé avec l'aide d'outils d'intelligence artificielle, sous la direction et la vérification de son auteur ([`juridique/DECLARATION-IA.md`](juridique/DECLARATION-IA.md)). Les analyses d'images tournent sur le PC du client ; aucune image n'est envoyée à un service d'IA.
+
+**Feedback** : bouton « Feedback » dans chaque programme, ou dms.security.list@gmail.com, ou un ticket sur GitHub.
+

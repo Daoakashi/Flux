@@ -1,8 +1,10 @@
 """Mises à jour de Flux depuis GitHub.
 
 Recherche : les « releases » du dépôt (avec leurs notes), ou à défaut le fichier version.json de la branche
-principale. Installation : télécharge l'archive, sauvegarde le code actuel dans « sauvegardes », puis remplace
-uniquement le code. Réglages, base de données, modèles, détections et environnement Python sont conservés.
+principale. Installation : télécharge l'archive de ce système, vérifie son empreinte SHA-256 (fichier SHA256SUMS.txt
+publié avec la version), sauvegarde le code actuel dans « sauvegardes », puis remplace uniquement le code. Les
+fichiers de code retirés de la nouvelle version sont supprimés ; en cas d'erreur, l'ancien code est remis en place.
+Réglages, base de données, modèles, détections, clé FluxLite et environnement Python sont conservés.
 """
 
 import hashlib
@@ -137,11 +139,13 @@ def verifier(cfg):
         zips = [a for a in r.get("assets", []) if a.get("name", "").lower().endswith(".zip")]
         archive = next((a for a in zips if plateformes.plateforme_archive(a["name"]) == plateformes.actuelle()), None) \
             or next((a for a in zips if plateformes.plateforme_archive(a["name"]) is None), None)
+        sommes = next((a for a in r.get("assets", []) if a.get("name", "").upper() == "SHA256SUMS.TXT"), None)
         candidates.append({
             "cle": cle, "version": nom.lstrip("vV"), "titre": r.get("name") or nom, "notes": r.get("body") or "",
             "page": r.get("html_url") or f"https://github.com/{d}/releases",
             "archive": (archive or {}).get("url") if archive else r.get("zipball_url"),
             "archive_nom": (archive or {}).get("name", ""), "date": r.get("published_at") or "",
+            "sommes": (sommes or {}).get("url", ""),
         })
     if not candidates:  # pas de release : version.json de la branche principale
         try:
@@ -224,6 +228,15 @@ def installer(cfg, info, racine=config.RACINE, progression=None):
                   progression=lambda lu, total: etape(
                       f"Téléchargement… {lu / 1e6:.1f} Mo" + (f" / {total / 1e6:.1f} Mo" if total else ""),
                       0.05 + 0.55 * (lu / total if total else 0.3)))
+    if info.get("sommes") and info.get("archive_nom"):
+        etape("Vérification de l'archive…", 0.6)
+        attendue = empreinte_attendue(_get(info["sommes"], cfg, binaire=True).decode("utf-8", "replace"),
+                                      info["archive_nom"])
+        if not attendue:
+            raise ErreurMaj(f"empreinte de {info['archive_nom']} absente de SHA256SUMS.txt")
+        if hashlib.sha256(octets).hexdigest() != attendue:
+            raise ErreurMaj("l'archive téléchargée est abîmée ou modifiée (empreinte SHA-256 différente) : "
+                            "rien n'a été installé, réessayez plus tard")
     try:
         z = zipfile.ZipFile(io.BytesIO(octets))
     except zipfile.BadZipFile:
@@ -244,23 +257,77 @@ def installer(cfg, info, racine=config.RACINE, progression=None):
     sauvegarde = sauvegarder_code(racine, f"avant_{config.APP_VERSION}_{time.strftime('%Y%m%d_%H%M%S')}.zip")
 
     etape("Installation des fichiers…", 0.75)
-    for i, (n, rel) in enumerate(a_copier):
-        dest = os.path.join(racine, rel)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        tmp = dest + ".maj"
-        with z.open(n) as src, open(tmp, "wb") as f:
-            shutil.copyfileobj(src, f)
-        os.replace(tmp, dest)
-        if rel.endswith(".sh"):  # Linux : les scripts doivent rester exécutables
-            try:
-                os.chmod(dest, 0o755)
-            except OSError:
-                pass
-        etape("Installation des fichiers…", 0.75 + 0.2 * (i + 1) / max(1, len(a_copier)))
+    try:
+        for i, (n, rel) in enumerate(a_copier):
+            dest = os.path.join(racine, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            tmp = dest + ".maj"
+            with z.open(n) as src, open(tmp, "wb") as f:
+                shutil.copyfileobj(src, f)
+            os.replace(tmp, dest)
+            if rel.endswith(".sh"):  # Linux : les scripts doivent rester exécutables
+                try:
+                    os.chmod(dest, 0o755)
+                except OSError:
+                    pass
+            etape("Installation des fichiers…", 0.75 + 0.2 * (i + 1) / max(1, len(a_copier)))
+        retires = retirer_anciens(racine, {rel for _, rel in a_copier})
+    except (OSError, zipfile.BadZipFile) as e:
+        restaurer(racine, sauvegarde)
+        raise ErreurMaj(f"installation interrompue ({e}) : l'ancienne version a été remise en place") from None
     req_change = _empreinte(os.path.join(racine, "requirements.txt")) != req_avant
     etape("Terminé", 1.0)
-    return {"fichiers": len(a_copier), "sauvegarde": sauvegarde, "dependances": req_change,
+    return {"fichiers": len(a_copier), "sauvegarde": sauvegarde, "dependances": req_change, "retires": retires,
             "version": info.get("libelle") or info.get("version")}
+
+
+def empreinte_attendue(texte_sommes, nom):
+    """Ligne « <sha256>  <nom> » de SHA256SUMS.txt (format de sha256sum)."""
+    for ligne in texte_sommes.splitlines():
+        morceaux = ligne.strip().split()
+        if len(morceaux) == 2 and morceaux[1].lstrip("*") == nom and re.fullmatch(r"[0-9a-fA-F]{64}", morceaux[0]):
+            return morceaux[0].lower()
+    return ""
+
+
+# Seul le code est concerné : jamais les données, même si elles traînent dans le dossier flux/
+EXTENSIONS_CODE = (".py", ".js", ".css", ".html", ".svg", ".webmanifest")
+
+
+def retirer_anciens(racine, nouveaux):
+    """Supprime les fichiers de code du dossier flux/ qui n'existent plus dans la nouvelle version (ils restent
+    dans la sauvegarde). Évite qu'un ancien module oublié soit encore chargé. Renvoie le nombre de fichiers retirés."""
+    nouveaux = {os.path.normpath(r) for r in nouveaux}
+    if not any(r.startswith("flux" + os.sep) for r in nouveaux):
+        return 0  # archive inattendue : on ne touche à rien
+    n = 0
+    for d, sous, fichiers in os.walk(os.path.join(racine, "flux")):
+        sous[:] = [x for x in sous if x != "__pycache__"]
+        for f in fichiers:
+            rel = os.path.normpath(os.path.relpath(os.path.join(d, f), racine))
+            if f.endswith(EXTENSIONS_CODE) and rel not in nouveaux and not _protege(rel):
+                try:
+                    os.remove(os.path.join(racine, rel))
+                    n += 1
+                except OSError:
+                    pass
+    return n
+
+
+def restaurer(racine, sauvegarde):
+    """Remet le code de la sauvegarde (après une installation interrompue)."""
+    try:
+        with zipfile.ZipFile(sauvegarde) as z:
+            for n in z.namelist():
+                rel = os.path.normpath(n)
+                if n.endswith("/") or rel.startswith("..") or os.path.isabs(rel):
+                    continue
+                dest = os.path.join(racine, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with z.open(n) as src, open(dest, "wb") as f:
+                    shutil.copyfileobj(src, f)
+    except (OSError, zipfile.BadZipFile):
+        pass
 
 
 def preparer_publication(racine=config.RACINE):
@@ -289,4 +356,7 @@ def preparer_publication(racine=config.RACINE):
                     with open(os.path.join(d, f), "rb") as src:
                         z.writestr(info, src.read())
         chemins.append(chemin)
+    with open(os.path.join(dossier, "SHA256SUMS.txt"), "w", encoding="utf-8") as f:
+        for chemin in chemins:
+            f.write(f"{_empreinte(chemin)}  {os.path.basename(chemin)}\n")
     return chemins

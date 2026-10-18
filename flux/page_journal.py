@@ -309,6 +309,9 @@ class PageJournal(QWidget):
         if len(ids) == 1 and self.table.item(lignes[0], 3).text() == TYPES_ACTION["video"]:
             m.addSeparator()
             m.addAction("Ouvrir la vidéo").triggered.connect(lambda: self._ouvrir_video(lignes[0]))
+            if not self.fen.kiosque:
+                m.addAction("Ouvrir avec le lecteur du système").triggered.connect(
+                    lambda: self._ouvrir_video(lignes[0], externe=True))
         pid = self.table.item(lignes[0], 0).data(Qt.ItemDataRole.UserRole)[1]
         if pid and len(ids) == 1:
             m.addSeparator()
@@ -357,12 +360,16 @@ class PageJournal(QWidget):
         chemin = os.path.join(self.fen.cfg.dossier_sortie(), "videos", m.group(1))
         return chemin if os.path.isfile(chemin) else None
 
-    def _ouvrir_video(self, ligne):
+    def _ouvrir_video(self, ligne, externe=False):
+        """Par défaut dans le Lecteur de Flux : en mode kiosque (plein écran, sans bureau), un lecteur externe
+        s'ouvrirait derrière Flux et deviendrait inaccessible au premier clic."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
         chemin = self._chemin_video(ligne)
-        if chemin:
+        if chemin and externe and not self.fen.kiosque:
             QDesktopServices.openUrl(QUrl.fromLocalFile(chemin))
+        elif chemin:
+            self.fen.ouvrir_video(chemin)
         else:
             self.fen.toast("Vidéo introuvable (supprimée ou dossier déplacé).", "erreur")
 

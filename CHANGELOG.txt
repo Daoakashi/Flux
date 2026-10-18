@@ -1,3 +1,35 @@
+Beta Version 0.10.0 alpha
++ Ajouts
+  - Plusieurs PC Flux dans l'interface web : un directeur suit tous ses établissements depuis une seule
+    page. Compte › Serveurs Flux › « Ajouter un PC Flux » (adresse, mail, mot de passe) :
+    - leurs caméras et leurs alertes s'affichent avec celles de ce PC, avec le nom du serveur ;
+    - « Tous les serveurs » ou seulement un ou plusieurs ;
+    - pilotage serveur par serveur, avec « Appliquer aussi aux autres serveurs » ;
+    - pas de compte sur l'autre serveur : « Créer mon compte sur ce serveur avec mes informations ».
+    Chaque serveur garde ses propres comptes et ses propres droits.
+  - Transfert de comptes entre PC Flux : page FluxLite › Transférer › Exporter, puis Importer sur l'autre
+    PC. Fichier chiffré par mot de passe (AES-256) ; les personnes gardent leur mail, leur mot de passe
+    et leur droit de pilotage, sans recréer de compte. Les entreprises manquantes sont créées.
+  - Bouton « Feedback » (barre de gauche, À propos, interface web) : idée, problème ou question, envoyés
+    par mail (dms.security.list@gmail.com) ou sur GitHub, après relecture. En kiosque : message à copier.
+  - Dossier « juridique » : mentions légales, licence AGPL expliquée, conditions de vente, conditions
+    d'utilisation des applications, confidentialité, accord de sous-traitance RGPD, obligations du
+    client (loi caméras), modèles de registre, d'analyse d'impact et d'affiche, règlement européen sur
+    l'IA, licences tierces. Flux indique qu'il a été développé avec l'aide de l'IA.
+  - Mises à jour plus sûres :
+    - empreinte SHA-256 de l'archive vérifiée avant l'installation (fichier SHA256SUMS.txt publié avec
+      chaque version) ;
+    - les anciens fichiers de code retirés de la nouvelle version sont supprimés ;
+    - en cas d'erreur pendant l'installation, l'ancienne version est remise en place ;
+    - nouvelle recherche toutes les 12 heures quand Flux reste ouvert (kiosque, PC de magasin), sans
+      fenêtre : indication en bas de l'écran.
+* Bug résolus
+  - Linux, mode kiosque : une vidéo ouverte depuis le Journal s'ouvrait dans le lecteur du système,
+    derrière Flux en plein écran, et devenait inaccessible au premier clic. Elle s'ouvre maintenant dans
+    le Lecteur de Flux. En kiosque, les autres programmes (navigateur, explorateur) ne s'ouvrent plus
+    derrière Flux : un message l'indique. Menu du Journal : « Ouvrir avec le lecteur du système » hors
+    kiosque.
+
 Beta Version 0.9.7 alpha
 + Ajouts
   - Interface web : ouvrez https://<adresse de ce PC>:47810 dans le navigateur d'un PC, d'une

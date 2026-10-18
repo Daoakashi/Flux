@@ -120,4 +120,6 @@ ces services). La vérification des mises à jour ne lit que la liste des versio
 L'envoi de statistiques d'Ultralytics est désactivé.
 
 Licences des modèles : YOLO26/YOLO11/RT-DETR (Ultralytics, AGPL-3.0), YuNet et SFace (OpenCV Zoo),
-HSEmotion, RapidOCR. Pour un usage commercial, vérifiez la licence Ultralytics.
+HSEmotion, RapidOCR. Flux est un logiciel libre (GNU AGPL-3.0, © 2026 DMS Security), développé avec
+l'aide d'outils d'intelligence artificielle. Licences, conditions de vente, RGPD, loi caméras et règlement
+européen sur l'IA : dossier « juridique » (commencez par juridique/LISEZMOI.md).

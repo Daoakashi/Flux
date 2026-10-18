@@ -12,7 +12,7 @@
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# along with this program.  If not, see <https://www.gnu.org/juridique/licences/>.
 
 """Onglet « À propos » de Flux : version, licence AGPL, code source et licences tierces.
 
@@ -21,8 +21,8 @@ Intégration :
     tabs.addTab(AboutTab(version="Beta Version 0.x alpha"), "À propos")
 
 Fichiers attendus à côté de l'application (et dans l'installeur PyInstaller) :
-    LICENSE, THIRD_PARTY_LICENSES.md, licenses/*.txt
-    PyInstaller : --add-data "LICENSE;." --add-data "THIRD_PARTY_LICENSES.md;." --add-data "licenses;licenses"
+    LICENSE, juridique/LICENCES-TIERCES.md, juridique/licences/*.txt
+    PyInstaller : --add-data "LICENSE;." --add-data "juridique/LICENCES-TIERCES.md;." --add-data "juridique;juridique"
     (sous Linux, remplacer ";" par ":")
 """
 
@@ -49,46 +49,46 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 
-# --- À compléter -----------------------------------------------------------
+# --- Éditeur (voir juridique/MENTIONS-LEGALES.md) ---------------------------
 APP_NAME = "Flux"
-PUBLISHER = "[NOM DE L'ENTREPRISE]"
-COPYRIGHT_YEAR = "[ANNÉE]"
+PUBLISHER = "DMS Security"
+COPYRIGHT_YEAR = "2026"
 SOURCE_URL = "https://github.com/Daoakashi/Flux"
-WEBSITE_URL = "[SITE WEB]"
-CONTACT_EMAIL = "[E-MAIL]"
+WEBSITE_URL = "https://daoakashi.github.io/flux-web"
+CONTACT_EMAIL = "dms.security.list@gmail.com"
 # ---------------------------------------------------------------------------
 
-AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
+AGPL_URL = "https://www.gnu.org/juridique/licences/agpl-3.0.html"
 
 # (composant, licence, fichier de licence relatif à la racine ou URL, source)
 THIRD_PARTY: list[tuple[str, str, str, str]] = [
     ("Ultralytics YOLO", "AGPL-3.0", "LICENSE", "https://github.com/ultralytics/ultralytics"),
     ("ultralytics-thop", "AGPL-3.0", "LICENSE", "https://github.com/ultralytics/thop"),
     ("ultralytics-platform", "AGPL-3.0", "LICENSE", "https://pypi.org/project/ultralytics-platform/"),
-    ("Python", "PSF-2.0", "licenses/PSF-2.0.txt", "https://www.python.org"),
-    ("PySide6 / Qt 6", "LGPL-3.0", "licenses/LGPL-3.0.txt", "https://code.qt.io/cgit/pyside/pyside-setup.git"),
-    ("PyTorch", "BSD-3-Clause", "licenses/PyTorch-BSD-3-Clause.txt", "https://github.com/pytorch/pytorch"),
-    ("torchvision", "BSD-3-Clause", "licenses/torchvision-BSD-3-Clause.txt", "https://github.com/pytorch/vision"),
-    ("OpenCV", "Apache-2.0", "licenses/Apache-2.0.txt", "https://github.com/opencv/opencv"),
-    ("FFmpeg (via OpenCV)", "LGPL-2.1", "licenses/LGPL-2.1.txt", "https://ffmpeg.org"),
-    ("YuNet", "MIT", "licenses/YuNet-MIT.txt", "https://github.com/opencv/opencv_zoo"),
-    ("OpenVINO", "Apache-2.0", "licenses/Apache-2.0.txt", "https://github.com/openvinotoolkit/openvino"),
-    ("ONNX Runtime", "MIT", "licenses/ONNXRuntime-MIT.txt", "https://github.com/microsoft/onnxruntime"),
+    ("Python", "PSF-2.0", "juridique/licences/PSF-2.0.txt", "https://www.python.org"),
+    ("PySide6 / Qt 6", "LGPL-3.0", "juridique/licences/LGPL-3.0.txt", "https://code.qt.io/cgit/pyside/pyside-setup.git"),
+    ("PyTorch", "BSD-3-Clause", "juridique/licences/PyTorch-BSD-3-Clause.txt", "https://github.com/pytorch/pytorch"),
+    ("torchvision", "BSD-3-Clause", "juridique/licences/torchvision-BSD-3-Clause.txt", "https://github.com/pytorch/vision"),
+    ("OpenCV", "Apache-2.0", "juridique/licences/Apache-2.0.txt", "https://github.com/opencv/opencv"),
+    ("FFmpeg (via OpenCV)", "LGPL-2.1", "juridique/licences/LGPL-2.1.txt", "https://ffmpeg.org"),
+    ("YuNet", "MIT", "juridique/licences/YuNet-MIT.txt", "https://github.com/opencv/opencv_zoo"),
+    ("OpenVINO", "Apache-2.0", "juridique/licences/Apache-2.0.txt", "https://github.com/openvinotoolkit/openvino"),
+    ("ONNX Runtime", "MIT", "juridique/licences/ONNXRuntime-MIT.txt", "https://github.com/microsoft/onnxruntime"),
     ("NVIDIA CUDA / cuDNN", "Licence NVIDIA", "https://docs.nvidia.com/cuda/eula/", "https://developer.nvidia.com/cuda-toolkit"),
-    ("NumPy", "BSD-3-Clause", "licenses/NumPy-BSD-3-Clause.txt", "https://github.com/numpy/numpy"),
-    ("Matplotlib", "Matplotlib (PSF)", "licenses/Matplotlib.txt", "https://github.com/matplotlib/matplotlib"),
-    ("Pillow", "MIT-CMU", "licenses/Pillow-MIT-CMU.txt", "https://github.com/python-pillow/Pillow"),
-    ("PyYAML", "MIT", "licenses/PyYAML-MIT.txt", "https://github.com/yaml/pyyaml"),
-    ("Polars", "MIT", "licenses/Polars-MIT.txt", "https://github.com/pola-rs/polars"),
-    ("psutil", "BSD-3-Clause", "licenses/psutil-BSD-3-Clause.txt", "https://github.com/giampaolo/psutil"),
+    ("NumPy", "BSD-3-Clause", "juridique/licences/NumPy-BSD-3-Clause.txt", "https://github.com/numpy/numpy"),
+    ("Matplotlib", "Matplotlib (PSF)", "juridique/licences/Matplotlib.txt", "https://github.com/matplotlib/matplotlib"),
+    ("Pillow", "MIT-CMU", "juridique/licences/Pillow-MIT-CMU.txt", "https://github.com/python-pillow/Pillow"),
+    ("PyYAML", "MIT", "juridique/licences/PyYAML-MIT.txt", "https://github.com/yaml/pyyaml"),
+    ("Polars", "MIT", "juridique/licences/Polars-MIT.txt", "https://github.com/pola-rs/polars"),
+    ("psutil", "BSD-3-Clause", "juridique/licences/psutil-BSD-3-Clause.txt", "https://github.com/giampaolo/psutil"),
     ("nvidia-ml-py", "BSD", "https://pypi.org/project/nvidia-ml-py/", "https://pypi.org/project/nvidia-ml-py/"),
-    ("Requests", "Apache-2.0", "licenses/Apache-2.0.txt", "https://github.com/psf/requests"),
-    ("COCO (données d'entraînement)", "CC BY 4.0", "licenses/CC-BY-4.0.txt", "https://cocodataset.org"),
+    ("Requests", "Apache-2.0", "juridique/licences/Apache-2.0.txt", "https://github.com/psf/requests"),
+    ("COCO (données d'entraînement)", "CC BY 4.0", "juridique/licences/CC-BY-4.0.txt", "https://cocodataset.org"),
 ]
 
 
 def resource_root() -> Path:
-    """Dossier contenant LICENSE et licenses/, en développement comme une fois empaqueté."""
+    """Dossier contenant LICENSE et juridique/licences/, en développement comme une fois empaqueté."""
     if hasattr(sys, "_MEIPASS"):  # PyInstaller
         return Path(sys._MEIPASS)
     return Path(__file__).resolve().parent

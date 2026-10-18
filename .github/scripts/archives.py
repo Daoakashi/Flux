@@ -3,6 +3,7 @@
 Seuls les fichiers suivis par git sont pris (jamais de données, réglages ou environnement), sans le dossier .github.
 Chaque archive ne contient que les scripts de son système (voir flux/plateformes.py).
 """
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -33,4 +34,11 @@ for p in plateformes.PLATEFORMES:
                 z.writestr(info, src.read())
             n += 1
     print(f"{nom} : {n} fichiers")
+# Empreintes vérifiées par les mises à jour de Flux avant l'installation
+with open("SHA256SUMS.txt", "w", encoding="utf-8") as f:
+    for p in plateformes.PLATEFORMES:
+        nom = plateformes.nom_archive(version, canal, p)
+        with open(nom, "rb") as a:
+            f.write(f"{hashlib.sha256(a.read()).hexdigest()}  {nom}\n")
+print(open("SHA256SUMS.txt", encoding="utf-8").read())
 sys.exit(0)

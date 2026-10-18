@@ -293,6 +293,72 @@ class DialogueCompte(QDialog):
             self.accept()
 
 
+class DialogueExportComptes(QDialog):
+    """Choix des comptes à copier vers un autre PC Flux, et mot de passe du fichier."""
+
+    def __init__(self, parent, comptes):
+        super().__init__(parent)
+        self.setWindowTitle("Transférer des comptes vers un autre PC Flux")
+        self.setMinimumSize(520, 520)
+        v = QVBoxLayout(self)
+        v.addWidget(etiquette("Les comptes choisis sont copiés dans un fichier chiffré, avec leur mot de passe (sous "
+                              "forme d'empreinte, jamais en clair), leur entreprise et leur droit de pilotage. Sur "
+                              "l'autre PC Flux : page FluxLite › Transférer › Importer. Les personnes se connectent "
+                              "ensuite avec le même mail et le même mot de passe, sans recréer de compte."))
+        self.liste = QListWidget()
+        for c in comptes:
+            it = QListWidgetItem(f"{c['prenom']} {c['nom']} · {c['mail']}"
+                                 + (f" · {c['entreprise']}" if c.get("entreprise") else "")
+                                 + ("" if c["statut"] == "actif" else f" ({ms.STATUTS.get(c['statut'], c['statut'])})"))
+            it.setData(Qt.ItemDataRole.UserRole, c["id"])
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if c["statut"] == "actif" else Qt.CheckState.Unchecked)
+            self.liste.addItem(it)
+        v.addWidget(self.liste, 1)
+        h = QHBoxLayout()
+        for texte, etat in (("Tout cocher", Qt.CheckState.Checked), ("Tout décocher", Qt.CheckState.Unchecked)):
+            b = Bouton(texte, "fantome")
+            b.clicked.connect(lambda _=False, e=etat: [self.liste.item(i).setCheckState(e)
+                                                      for i in range(self.liste.count())])
+            h.addWidget(b)
+        h.addStretch(1)
+        v.addLayout(h)
+        f = QFormLayout()
+        self.mdp, self.mdp2 = QLineEdit(), QLineEdit()
+        for c in (self.mdp, self.mdp2):
+            c.setEchoMode(QLineEdit.EchoMode.Password)
+        f.addRow("Mot de passe du fichier", self.mdp)
+        f.addRow("Confirmer", self.mdp2)
+        v.addLayout(f)
+        v.addWidget(etiquette("Au moins 8 caractères. Il sera demandé à l'import : transmettez-le séparément du "
+                              "fichier (par téléphone, par exemple)."))
+        self.lbl = etiquette("", "aide")
+        self.lbl.setStyleSheet(f"color: {C['danger']};")
+        v.addWidget(self.lbl)
+        h = QHBoxLayout()
+        h.addStretch(1)
+        b0 = Bouton("Annuler")
+        b0.clicked.connect(self.reject)
+        b1 = Bouton("Enregistrer le fichier…", "primaire", "telecharger")
+        b1.clicked.connect(self._ok)
+        h.addWidget(b0)
+        h.addWidget(b1)
+        v.addLayout(h)
+        self.ids = []
+
+    def _ok(self):
+        self.ids = [self.liste.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.liste.count())
+                    if self.liste.item(i).checkState() == Qt.CheckState.Checked]
+        if not self.ids:
+            self.lbl.setText("Cochez au moins un compte.")
+        elif len(self.mdp.text()) < 8:
+            self.lbl.setText("Le mot de passe du fichier doit faire au moins 8 caractères.")
+        elif self.mdp.text() != self.mdp2.text():
+            self.lbl.setText("Les deux mots de passe diffèrent.")
+        else:
+            self.accept()
+
+
 class DialogueValidation(QDialog):
     def __init__(self, parent, compte, entreprises):
         super().__init__(parent)
@@ -596,6 +662,11 @@ class PageFluxLite(QWidget):
         b = Bouton("Nouveau compte", "discret", "plus")
         b.clicked.connect(self._nouveau_compte)
         h.addWidget(b)
+        self.b_transfert = Bouton("Transférer", "discret", "reseau")
+        self.b_transfert.setToolTip("Copier des comptes vers un autre PC Flux, ou importer ceux d'un autre PC : les "
+                                    "personnes gardent leur mail et leur mot de passe.")
+        self.b_transfert.clicked.connect(self._menu_transfert)
+        h.addWidget(self.b_transfert)
         v.addLayout(h)
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(["Statut", "Prénom", "Nom", "Mail", "Entreprise", "Pilotage",
@@ -818,6 +889,79 @@ class PageFluxLite(QWidget):
         m.addSeparator()
         m.addAction("Supprimer le compte…", lambda: self._supprimer_compte(c))
         m.exec(self.table.viewport().mapToGlobal(pos) if pos is not None else self.cursor().pos())
+
+    # --- transfert de comptes entre PC Flux --------------------------------------------------------
+    def _menu_transfert(self):
+        m = QMenu(self)
+        m.addAction("Exporter des comptes vers un autre PC Flux…", self._exporter_comptes)
+        m.addAction("Importer des comptes d'un autre PC Flux…", self._importer_comptes)
+        m.exec(self.b_transfert.mapToGlobal(self.b_transfert.rect().bottomLeft()))
+
+    def _exporter_comptes(self):
+        from PySide6.QtWidgets import QFileDialog
+        if self.serveur is None:
+            return
+        comptes = self.serveur.comptes.comptes()
+        if not comptes:
+            return self.fen.toast("Aucun compte à transférer.", "info")
+        d = DialogueExportComptes(self, comptes)
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+        nom = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in self.serveur.nom).strip("-") or "Flux"
+        chemin, _ = QFileDialog.getSaveFileName(
+            self, "Enregistrer le transfert de comptes",
+            os.path.join(os.path.expanduser("~"), f"comptes-{nom}-{datetime.now():%Y%m%d}{ms.EXTENSION_TRANSFERT}"),
+            f"Transfert de comptes Flux (*{ms.EXTENSION_TRANSFERT})")
+        if not chemin:
+            return
+        if not chemin.endswith(ms.EXTENSION_TRANSFERT):
+            chemin += ms.EXTENSION_TRANSFERT
+        try:
+            octets = ms.exporter_comptes(self.serveur.comptes, d.ids, d.mdp.text(), self.serveur.nom)
+            with open(chemin, "wb") as f:
+                f.write(octets)
+        except (OSError, ms.ErreurServeur) as e:
+            return self.fen.toast(f"Export impossible : {e}", "erreur")
+        self.fen.toast(f"{len(d.ids)} compte(s) exporté(s) dans {os.path.basename(chemin)}.", "ok")
+
+    def _importer_comptes(self):
+        from PySide6.QtWidgets import QFileDialog
+        if self.serveur is None:
+            return
+        chemin, _ = QFileDialog.getOpenFileName(self, "Importer des comptes", os.path.expanduser("~"),
+                                                f"Transfert de comptes Flux (*{ms.EXTENSION_TRANSFERT});;Tous (*)")
+        if not chemin:
+            return
+        mdp, ok = QInputDialog.getText(self, "Importer des comptes", "Mot de passe du fichier :",
+                                       QLineEdit.EchoMode.Password)
+        if not ok:
+            return
+        try:
+            with open(chemin, "rb") as f:
+                donnees = ms.lire_transfert(f.read(), mdp)
+        except (OSError, ms.ErreurServeur) as e:
+            return self.fen.toast(f"Import impossible : {e}", "erreur")
+        liste = donnees["comptes"]
+        deja = [c for c in liste if self.serveur.comptes.compte_par_mail(str(c.get("mail", "")))]
+        boite = QMessageBox(self)
+        boite.setWindowTitle("Importer des comptes")
+        boite.setText(f"{len(liste)} compte(s) venant de « {donnees.get('serveur') or 'un autre PC Flux'} »"
+                      + (f", dont {len(deja)} déjà présent(s) ici." if deja else "."))
+        boite.setInformativeText("Les entreprises manquantes sont créées sans caméra : choisissez ensuite leurs "
+                                 "caméras dans l'onglet Entreprises.")
+        b_aj = boite.addButton("Importer les nouveaux", QMessageBox.ButtonRole.AcceptRole)
+        b_tout = boite.addButton("Importer et mettre à jour les existants", QMessageBox.ButtonRole.ApplyRole) \
+            if deja else None
+        boite.addButton("Annuler", QMessageBox.ButtonRole.RejectRole)
+        boite.exec()
+        if boite.clickedButton() not in (b_aj, b_tout) or boite.clickedButton() is None:
+            return
+        ajoutes, maj, ignores = ms.importer_comptes(self.serveur.comptes, donnees,
+                                                    remplacer=boite.clickedButton() is b_tout)
+        self._remplir_comptes()
+        if hasattr(self, "_remplir_entreprises"):
+            self._remplir_entreprises()
+        self.fen.toast(f"Import terminé : {ajoutes} ajouté(s), {maj} mis à jour, {ignores} ignoré(s).", "ok")
 
     def _valider(self):
         cid = self._compte_selectionne()

@@ -153,6 +153,21 @@ svg.ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor
 .carte-cam .infos strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .carte-cam .infos span { color: var(--texte2); font-size: 13px; margin-left: auto; white-space: nowrap; }
 
+/* --- plusieurs serveurs ------------------------------------------------------------------------------ */
+.puces { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.puce { min-height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--trait); background: var(--surface);
+        color: var(--texte2); cursor: pointer; font-weight: 600; font-size: 13.5px; }
+.puce:hover { border-color: var(--texte3); color: var(--texte); }
+.puce.active { background: var(--accent); border-color: var(--accent); color: var(--accent-texte); }
+.puce:focus-visible, .lien-nav:focus-visible { outline: 2px solid var(--accent-fort); outline-offset: 2px; }
+.nom-serveur { display: block; color: var(--texte3); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta .nom-serveur { display: inline; }
+.lien-nav { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; color: var(--texte2);
+            cursor: pointer; font-weight: 600; padding: 6px 0; margin-bottom: 4px; }
+.lien-nav:hover { color: var(--texte); }
+.lien-nav svg.ic { width: 17px; height: 17px; }
+textarea:focus { outline: none; border-color: var(--accent) !important; }
+
 /* --- vue d'une caméra --------------------------------------------------------------------------------- */
 .vue { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
 .vue .cadre-video { border-radius: var(--rayon); aspect-ratio: auto; min-height: 240px; max-height: calc(100vh - 180px); }
@@ -251,7 +266,8 @@ svg.ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor
   .ligne-champs { grid-template-columns: 1fr; }
   .boite { padding: 22px 18px; }
   .alerte-ligne .vignette { width: 92px; }
-  .filtres select { min-width: 0; flex: 1; }
+  .filtres select { min-width: 0; flex: 1 1 100%; }
+  .filtres .case { flex: 1 1 100%; }
   .entete .sous { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

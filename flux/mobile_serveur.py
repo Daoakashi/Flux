@@ -60,7 +60,7 @@ FICHIERS_WEB = {"": ("index.html", "text/html; charset=utf-8"),
 COOKIE_WEB = "flux_web"
 ENTETES_WEB = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; "
-                               "connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                               "connect-src 'self' https:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
                                "form-action 'none'",
     "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cross-Origin-Opener-Policy": "same-origin",
     "Strict-Transport-Security": "max-age=31536000",
@@ -269,6 +269,91 @@ class Identite:
         if relais:
             d["r"] = relais
         return f"fluxlite://appairer?{urllib.parse.urlencode(d)}"
+
+
+# ---------------------------------------------------------------------------
+# Transfert de comptes d'un PC Flux à un autre (fichier chiffré par mot de passe)
+# ---------------------------------------------------------------------------
+ENTETE_TRANSFERT = b"FLUXCOMPTES1"
+EXTENSION_TRANSFERT = ".fluxcomptes"
+
+
+def _cle_transfert(mot_de_passe, sel):
+    return hashlib.scrypt(mot_de_passe.encode("utf-8"), salt=sel, n=2 ** 15, r=8, p=1, maxmem=64 * 1024 * 1024,
+                          dklen=32)
+
+
+def exporter_comptes(comptes, ids, mot_de_passe, serveur=""):
+    """Fichier de transfert : comptes choisis (avec l'empreinte de leur mot de passe, jamais le mot de passe) et le
+    nom de leur entreprise, chiffrés en AES-256-GCM avec une clé tirée du mot de passe de transfert (scrypt)."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    if len(mot_de_passe or "") < 8:
+        raise ErreurServeur("le mot de passe du fichier doit faire au moins 8 caractères")
+    liste = []
+    for cid in ids:
+        c = comptes._un("SELECT c.*, e.nom AS entreprise FROM comptes c LEFT JOIN entreprises e "
+                        "ON e.id = c.entreprise_id WHERE c.id = ?", (cid,))
+        if c:
+            liste.append({k: c.get(k) for k in ("mail", "nom", "prenom", "societe", "statut", "hash", "pilotage",
+                                                 "entreprise", "cgu_version", "cgu_le", "cree_le")})
+    donnees = json.dumps({"format": 1, "serveur": serveur, "date": time.time(), "comptes": liste},
+                         ensure_ascii=False).encode("utf-8")
+    sel, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
+    chiffre = AESGCM(_cle_transfert(mot_de_passe, sel)).encrypt(nonce, donnees, ENTETE_TRANSFERT)
+    return ENTETE_TRANSFERT + sel + nonce + chiffre
+
+
+def lire_transfert(octets, mot_de_passe):
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    n = len(ENTETE_TRANSFERT)
+    if not octets.startswith(ENTETE_TRANSFERT) or len(octets) < n + 28 + 16:
+        raise ErreurServeur("ce fichier n'est pas un transfert de comptes Flux")
+    sel, nonce, chiffre = octets[n:n + 16], octets[n + 16:n + 28], octets[n + 28:]
+    try:
+        d = json.loads(AESGCM(_cle_transfert(mot_de_passe, sel)).decrypt(nonce, chiffre, ENTETE_TRANSFERT))
+    except InvalidTag:
+        raise ErreurServeur("mot de passe incorrect, ou fichier abîmé") from None
+    if not isinstance(d, dict) or d.get("format") != 1 or not isinstance(d.get("comptes"), list):
+        raise ErreurServeur("version de fichier inconnue : mettez Flux à jour")
+    return d
+
+
+def importer_comptes(comptes, donnees, remplacer=False):
+    """Ajoute les comptes du transfert. Une adresse déjà présente est ignorée, ou mise à jour si `remplacer`
+    (nom, prénom, mot de passe, droit de pilotage). Les entreprises manquantes sont créées sans caméra : vous
+    choisissez ensuite leurs caméras dans la page FluxLite. Renvoie (ajoutés, mis à jour, ignorés)."""
+    ajoutes = maj = ignores = 0
+    for c in donnees.get("comptes", []):
+        mail = str(c.get("mail") or "").strip()
+        h = str(c.get("hash") or "")
+        if not RE_MAIL.match(mail) or not h.startswith("scrypt$"):
+            ignores += 1
+            continue
+        eid = None
+        if c.get("entreprise"):
+            e = next((x for x in comptes.entreprises() if x["nom"].lower() == str(c["entreprise"]).lower()), None)
+            eid = e["id"] if e else comptes.creer_entreprise(str(c["entreprise"])[:80])
+        existant = comptes.compte_par_mail(mail)
+        if existant:
+            if not remplacer:
+                ignores += 1
+                continue
+            comptes._x("UPDATE comptes SET nom = ?, prenom = ?, hash = ?, pilotage = ? WHERE id = ?",
+                       (str(c.get("nom") or existant["nom"])[:60], str(c.get("prenom") or existant["prenom"])[:60],
+                        h, int(bool(c.get("pilotage"))), existant["id"]))
+            if eid and not existant.get("entreprise_id"):
+                comptes.modifier_compte(existant["id"], entreprise_id=eid)
+            maj += 1
+            continue
+        statut = c.get("statut") if c.get("statut") in STATUTS else "attente"
+        comptes._x("INSERT INTO comptes (mail, nom, prenom, societe, entreprise_id, statut, hash, cree_le, appareil, "
+                   "version_app, cgu_version, cgu_le, pilotage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (mail[:254], str(c.get("nom") or "")[:60], str(c.get("prenom") or "")[:60],
+                    str(c.get("societe") or "")[:80], eid, statut, h, float(c.get("cree_le") or time.time()), "",
+                    "transfert", c.get("cgu_version"), c.get("cgu_le"), int(bool(c.get("pilotage")))))
+        ajoutes += 1
+    return ajoutes, maj, ignores
 
 
 # ---------------------------------------------------------------------------
@@ -1106,8 +1191,16 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def appli(self):
         return self.server.appli
 
+    def entetes_cors(self):
+        """L'interface web d'un autre PC Flux peut appeler ce serveur (directeur qui suit plusieurs sites). Le
+        navigateur n'envoie alors aucun cookie : seule une session « Bearer » ouverte sur ce serveur est acceptée."""
+        if getattr(self, "_cors", False):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
+
     def _envoyer(self, code, corps, type_="application/json; charset=utf-8", entetes=None):
         self.send_response(code)
+        self.entetes_cors()
         self.send_header("Content-Type", type_)
         self.send_header("Content-Length", str(len(corps)))
         self.send_header("Cache-Control", "no-store")
@@ -1154,6 +1247,10 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         return {"Set-Cookie": f"{COOKIE_WEB}={jeton}; Path=/; Max-Age={int(duree)}; Secure; HttpOnly; "
                               "SameSite=Strict"}
 
+    def meme_origine(self):
+        origine = self.headers.get("Origin")
+        return not origine or origine == f"https://{self.headers.get('Host', '')}"
+
     def jeton_requete(self):
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
@@ -1166,8 +1263,10 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         jeton = auth[7:].strip() if auth.startswith("Bearer ") else ""
         if not jeton:
             jeton = self.cookie_web()
-            # Protection CSRF : un autre site ne peut pas ajouter cet en-tête à une requête vers ce PC
-            if jeton and self.command not in ("GET", "HEAD") and self.headers.get("X-Flux") != "web":
+            # Protection CSRF : un autre site ne peut pas ajouter cet en-tête à une requête vers ce PC, et une
+            # requête venant d'une autre origine n'est jamais authentifiée par le cookie
+            if jeton and ((self.command not in ("GET", "HEAD") and self.headers.get("X-Flux") != "web")
+                          or not self.meme_origine()):
                 self.erreur(403, "Requête refusée.")
                 return None, None
             if jeton and not self.appli.r("web", True):
@@ -1201,6 +1300,18 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._router("HEAD")
 
+    def do_OPTIONS(self):
+        """Pré-vérification CORS du navigateur (interface web d'un autre PC Flux)."""
+        if not self.path.startswith("/api/v1/") or not self.appli.r("web", True):
+            return self.erreur(404, "Adresse inconnue.")
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def page_web(self, fichier):
         if not self.appli.r("web", True):
             return self.erreur(404, "L'interface web est désactivée sur ce PC (Réglages › FluxLite).")
@@ -1213,6 +1324,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         self._envoyer(200, octets, type_, ENTETES_WEB)
 
     def _router(self, methode):
+        self._cors = False
         url = urllib.parse.urlsplit(self.path)
         chemin = url.path.rstrip("/")
         self.q = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query).items()}
@@ -1222,6 +1334,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                 return self.page_web(chemin.lstrip("/"))
             if not chemin.startswith("/api/v1"):
                 return self.erreur(404, "Adresse inconnue.")
+            self._cors = not self.meme_origine() and bool(self.appli.r("web", True))
             route = "/".join(p[3:])
             if methode == "GET" and route == "info":
                 return self.info()
@@ -1286,7 +1399,8 @@ class _Gestionnaire(BaseHTTPRequestHandler):
     def info(self):
         a = self.appli
         self.json({"application": "Flux", "nom": a.nom, "api": VERSION_API, "version_flux": a.version_flux,
-                   "fonctions": ["pilotage", "pilotage_cameras", "niveau", "delais", "relais"],
+                   "fonctions": ["pilotage", "pilotage_cameras", "niveau", "delais", "relais", "web",
+                                "multi_serveurs"],
                    "inscription": bool(a.r("inscription", True)),
                    "validation_manuelle": bool(a.r("validation_manuelle", True)), "cgu_version": VERSION_CGU,
                    "responsable": (a.r("responsable", "") or "").strip(), "contact": (a.r("contact", "") or "").strip(),
@@ -1496,6 +1610,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         try:
             fps = max(1.0, min(float(self.q.get("fps", a.r("fps", 8))), float(a.r("fps", 8))))
             self.send_response(200)
+            self.entetes_cors()
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=fluxlite")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
