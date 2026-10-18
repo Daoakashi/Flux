@@ -28,6 +28,7 @@ from .sources import PREFIXE_MAIL_OK, Mailer, slug
 from .taches import Tache
 from .theme import C, T, couleur, dessiner_logo, icone_application, police, regler_logo
 from .widgets import Bouton, BoutonNav, Logo, Toasts, etiquette
+from .feedback import CREDITS_IA
 from . import vision
 from . import kiosque
 
@@ -270,6 +271,7 @@ class APropos(QDialog):
                               "artificielle (assistant de programmation), sous la direction et la vérification de son "
                               "auteur. Les analyses d'images tournent sur ce PC : aucune image n'est envoyée à un "
                               "service d'IA."))
+        v.addWidget(etiquette(CREDITS_IA))
         h2 = QHBoxLayout()
         bo = Bouton("Ouvrir le dossier", "discret", "dossier")
         bo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(RACINE)))

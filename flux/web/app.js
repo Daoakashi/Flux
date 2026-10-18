@@ -1295,6 +1295,7 @@
             el("dt", { texte: "Conditions" }), el("dd", { texte: `version ${c.cgu_version || "—"}` })),
           el("p", { style: "margin:12px 0 0;color:var(--texte2);font-size:13px",
             texte: "Flux a été conçu et développé avec l'aide d'outils d'intelligence artificielle (assistant de programmation), sous la direction et la vérification de son auteur. Aucune donnée de ce PC n'est envoyée à un service d'IA." }),
+          el("p", { style: "margin:8px 0 0;color:var(--texte3);font-size:12px", texte: "Crédits : conception, choix des fonctions, tests et validation par DMS Security. Code et textes écrits en partie avec l'assistant d'IA Claude (Anthropic), qui cède à l'utilisateur ses droits éventuels sur ce qu'il produit. La licence AGPL-3.0 couvre l'apport humain ; les parties produites uniquement par l'IA peuvent ne pas être protégées par le droit d'auteur." }),
           el("div", { class: "boutons", style: "margin-top:12px" },
             el("button", { class: "btn petit", type: "button", onclick: feedback }, ic("message"), "Feedback")))));
   }

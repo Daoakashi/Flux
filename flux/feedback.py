@@ -107,3 +107,6 @@ class DialogueFeedback(QDialog):
     def _github(self):
         QDesktopServices.openUrl(QUrl(lien_github(self.sujet.currentText(), self._corps(), self.depot_url)))
         self.accept()
+
+# Crédits affichés dans « À propos » (Flux, interface web, applications).
+CREDITS_IA = ("Crédits : conception, choix des fonctions, tests et validation par DMS Security. Code et textes écrits en partie avec l'assistant d'IA Claude (Anthropic), qui cède à l'utilisateur ses droits éventuels sur ce qu'il produit. La licence AGPL-3.0 couvre l'apport humain ; les parties produites uniquement par l'IA peuvent ne pas être protégées par le droit d'auteur.")
