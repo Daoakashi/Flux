@@ -1,3 +1,33 @@
+Beta Version 0.10.1 alpha
++ Ajouts
+  - Plage horaire de la détection (Réglages › Détection, en haut) : par exemple de 6 h à 22 h, la nuit
+    seulement (22 h à 6 h) ou certains jours. En dehors, les images restent affichées mais rien n'est
+    analysé : ni alerte, ni vidéo, ni action. Modèles prêts (journée, nuit, heures de bureau, magasin
+    fermé, week-end). Réglable aussi à distance depuis FluxLite, Flux Remote et l'interface web (avec
+    « Appliquer aussi aux autres serveurs »). La barre d'état indique « Hors plage horaire · reprise à … ».
+  - Espace disque (nouvelle catégorie des Réglages) : Flux garde au plus 20 Go (réglable) de photos,
+    vidéos, journal et bases, et au moins 5 Go libres sur le disque. Au-delà, les plus anciens
+    enregistrements partent en premier (photos, vidéos, puis actions et alertes de la même période) ;
+    les plus récents sont toujours gardés. Les personnes enregistrées, les comptes et les réglages ne
+    sont jamais touchés. Jauge de l'espace utilisé et bouton « Faire le ménage maintenant ».
+  - Nom sur le réseau local : l'interface web s'ouvre avec https://flux.local au lieu de l'adresse IP
+    (PC Windows 10/11, Mac, iPhone, Linux). Nom réglable dans Réglages › Développeur (un nom par PC Flux
+    d'un même réseau, ex. flux-caisse.local), ainsi qu'un nom de domaine personnel :
+    - cameras.monmagasin.be (DNS de la box ou fichier hosts) ;
+    - ou monflux.duckdns.org, rempli automatiquement avec l'adresse locale du PC (fonctionne aussi sur
+      Android).
+    Les noms sont ajoutés au certificat de Flux, sans changer sa clé : les téléphones déjà reliés
+    restent reliés.
+  - Adresse sans numéro de port : Flux écoute aussi sur les ports 443 et 80 quand ils sont libres
+    (https://flux.local au lieu de https://flux.local:47810). Sous Linux, bouton « Autoriser l'adresse
+    sans port » (une seule fois, mot de passe administrateur).
+* Bug résolus
+  - Interface web inaccessible depuis les autres PC du réseau :
+    - une adresse tapée à la main (sans « https:// ») donnait une page vide : elle est maintenant
+      redirigée vers https ;
+    - le pare-feu de Windows (ou ufw / firewalld sous Linux) pouvait bloquer les autres appareils :
+      bouton « Autoriser dans le pare-feu » dans la page FluxLite (une seule fois).
+
 Beta Version 0.10.0 alpha
 + Ajouts
   - Plusieurs PC Flux dans l'interface web : un directeur suit tous ses établissements depuis une seule

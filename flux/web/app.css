@@ -273,3 +273,6 @@ textarea:focus { outline: none; border-color: var(--accent) !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+input[type=time] { min-height: 38px; padding: 0 10px; border-radius: var(--rayon-p); border: 1px solid var(--trait);
+  background: var(--surface); color: var(--texte); font: inherit; font-variant-numeric: tabular-nums; }
+input[type=time]:focus-visible { outline: 2px solid var(--accent-fort); outline-offset: 2px; }

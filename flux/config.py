@@ -102,7 +102,8 @@ CATEGORIES = [
     ("visages", "Visages et reconnaissance"), ("confidentialite", "Confidentialité (flou des têtes)"),
     ("plaques", "Plaques"), ("frequentation", "Fréquentation (heatmap)"), ("base", "Base de données"),
     ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
-    ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("lecteur", "Lecteur vidéo"),
+    ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("stockage", "Espace disque"),
+    ("lecteur", "Lecteur vidéo"),
     ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
 ]
 CATEGORIES_CACHEES = {"developpeur"}  # visibles seulement en mode développeur
@@ -146,6 +147,16 @@ SCHEMA = [
       "Désactivée : les caméras restent affichées (et visibles sur FluxLite) mais rien n'est analysé : aucune "
       "alerte, aucun mail, aucune notification. Chaque caméra a aussi son propre interrupteur « Détection ». "
       "Pilotable à distance depuis FluxLite."),
+    # Plage horaire (réglée par l'encadré en haut de la page Détection, et à distance)
+    R("horaire.actif", "detection", "Détection seulement pendant une plage horaire", "bool", False,
+      "En dehors de la plage, les images restent affichées mais rien n'est analysé (ni alerte ni vidéo).",
+      avance=True, groupe="Plage horaire"),
+    R("horaire.debut", "detection", "Début de la plage", "texte", "06:00", "Format 06:00.", avance=True,
+      groupe="Plage horaire"),
+    R("horaire.fin", "detection", "Fin de la plage", "texte", "22:00",
+      "Format 22:00. Une fin plus tôt que le début = la nuit (22:00 → 06:00).", avance=True, groupe="Plage horaire"),
+    R("horaire.jours", "detection", "Jours de la plage", "texte", "1234567",
+      "1 = lundi … 7 = dimanche (ex. 12345 = du lundi au vendredi).", avance=True, groupe="Plage horaire"),
     R("detection.niveau", "detection", "Niveau de scan", "choix", "equilibre",
       "Modèle et méthode d'analyse. Chaque caméra peut aussi choisir son propre niveau.",
       [("rapide", "Rapide"), ("equilibre", "Équilibré"), ("precis", "Précis"), ("maximum", "Maximum"),
@@ -362,6 +373,9 @@ SCHEMA = [
     R("fluxlite.web", "fluxlite", "Interface web (navigateur)", "bool", True,
       "Ouvrez https://<adresse de ce PC>:<port> dans le navigateur d'un PC, d'une tablette ou d'un téléphone du même "
       "réseau : mêmes comptes, mêmes caméras et mêmes droits que l'application FluxLite."),
+    R("fluxlite.nom_local", "fluxlite", "Nom sur le réseau local", "bool", True,
+      "Les ordinateurs, iPhone et Mac du réseau ouvrent l'interface web par un nom (https://flux.local) au lieu de "
+      "l'adresse IP. Le nom se change dans la catégorie Développeur."),
     R("fluxlite.relais", "fluxlite", "Accès hors WiFi (relais)", "bool", True,
       "Les téléphones et Flux Remote joignent ce PC depuis n'importe où (4G, autre site) en passant par le relais "
       "Flux, sans rien ouvrir dans la box. Les échanges restent chiffrés de bout en bout : le relais ne voit ni les "
@@ -420,6 +434,15 @@ SCHEMA = [
     R("clips.fps", "clips", "Images par seconde", "int", 12, "", None, 4, 25, 1, "", True),
     R("clips.conservation", "clips", "Conserver les vidéos", "int", 30, "0 = sans limite.", None, 0, 3650, 1,
       " jours"),
+
+    # --- Espace disque ------------------------------------------------------------------------
+    R("stockage.limite", "stockage", "Espace maximum pour Flux", "float", 20,
+      "Photos, vidéos, journal et bases. Au-delà, les plus anciens enregistrements sont supprimés en premier ; "
+      "les plus récents sont toujours gardés. 0 = sans limite.", None, 0, 2000, 1, " Go"),
+    R("stockage.libre_min", "stockage", "Garder libre sur le disque au moins", "float", 5,
+      "Si le disque se remplit (autres programmes), Flux libère aussi de la place, des plus anciens aux plus "
+      "récents. 0 = ne pas surveiller.", None, 0, 500, 1, " Go"),
+    R("stockage.intervalle", "stockage", "Vérifier toutes les", "int", 10, "", None, 1, 1440, 1, " min", True),
 
     # --- Lecteur ------------------------------------------------------------------------
     R("lecteur.mode", "lecteur", "Mode de lecture des liens", "choix", "direct",
@@ -484,6 +507,20 @@ SCHEMA = [
     R("developpeur.badge", "developpeur", "Badge « DEV » dans la barre d'état", "bool", True),
     R("developpeur.duree_demarrage", "developpeur", "Durée minimale de l'écran de démarrage", "float", 0,
       "Pour régler l'écran de démarrage.", None, 0, 15, 0.5, " s"),
+    R("developpeur.nom_reseau", "developpeur", "Nom de Flux sur le réseau local", "texte", "flux",
+      "« flux » donne https://flux.local. Lettres, chiffres et tirets. Un nom différent par PC Flux d'un même "
+      "réseau (ex. flux-caisse, flux-parking).", groupe="Adresse locale"),
+    R("developpeur.domaine", "developpeur", "Nom de domaine personnalisé", "texte", "",
+      "Ex. cameras.monmagasin.be ou monflux.duckdns.org : il doit pointer vers l'adresse IP locale de ce PC "
+      "(DNS de la box, fichier hosts, ou DuckDNS rempli automatiquement ci-dessous). Ajouté au certificat de Flux.",
+      groupe="Adresse locale"),
+    R("developpeur.duckdns_jeton", "developpeur", "Jeton DuckDNS (facultatif)", "mdp", "",
+      "Si le nom de domaine finit par .duckdns.org : Flux y inscrit son adresse IP locale toutes les 10 minutes. "
+      "Le nom fonctionne alors sur tous les appareils du réseau, Android compris.", groupe="Adresse locale"),
+    R("developpeur.ports_standard", "developpeur", "Adresse sans numéro de port", "choix", "auto",
+      "Écoute aussi sur le port 443 (https) et 80 (redirection) : https://flux.local au lieu de "
+      "https://flux.local:47810. Automatique : si les ports sont libres et autorisés.",
+      [("auto", "Automatique"), ("oui", "Toujours essayer"), ("non", "Non")], groupe="Adresse locale"),
 ]
 
 PAR_CLE = {r.cle: r for r in SCHEMA}

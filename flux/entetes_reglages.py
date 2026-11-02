@@ -340,3 +340,198 @@ def entete_clips(page):
     v.addWidget(etiquette("Bouton caméra (à côté de la capture) : enregistre une vidéo à la main. Double-clic sur une "
                           "action « Vidéo » du journal pour la regarder."))
     return w
+
+
+# ---------------------------------------------------------------------------
+# Plage horaire de la détection
+# ---------------------------------------------------------------------------
+def entete_horaire(page):
+    from PySide6.QtCore import QTime
+    from PySide6.QtWidgets import QFrame, QTimeEdit
+    from . import horaire as H
+    from .widgets import Interrupteur, Pastille
+    cfg = page.cfg
+    cadre = QFrame()
+    cadre.setObjectName("carte")
+    v = QVBoxLayout(cadre)
+    v.setContentsMargins(14, 12, 14, 12)
+    v.setSpacing(8)
+    h0 = QHBoxLayout()
+    titre = QLabel("Plage horaire de la détection")
+    titre.setObjectName("titre_section")
+    h0.addWidget(titre)
+    h0.addStretch(1)
+    inter = Interrupteur()
+    h0.addWidget(inter)
+    v.addLayout(h0)
+    p = H.lire(cfg)
+    inter.setChecked(p["actif"])
+    ligne = QHBoxLayout()
+    ligne.setSpacing(8)
+    ligne.addWidget(QLabel("De"))
+    debut, fin = QTimeEdit(), QTimeEdit()
+    for t, val in ((debut, p["debut"]), (fin, p["fin"])):
+        t.setDisplayFormat("HH:mm")
+        t.setTime(QTime.fromString(val, "HH:mm"))
+        t.setFixedWidth(90)
+    ligne.addWidget(debut)
+    ligne.addWidget(QLabel("à"))
+    ligne.addWidget(fin)
+    ligne.addSpacing(10)
+    modeles = QComboBox()
+    ligne.addWidget(modeles)
+    ligne.addStretch(1)
+    v.addLayout(ligne)
+    ligne_jours = QHBoxLayout()
+    ligne_jours.setSpacing(6)
+    pastilles = []
+    for i, nom in enumerate(H.JOURS_COURTS):
+        pa = Pastille(nom, C["accent"])
+        pa.setChecked(i in p["jours"])
+        pastilles.append(pa)
+        ligne_jours.addWidget(pa)
+    ligne_jours.addStretch(1)
+    v.addLayout(ligne_jours)
+    resume = etiquette("")
+    v.addWidget(resume)
+
+    def lire_ui():
+        jours = [i for i, pa in enumerate(pastilles) if pa.isChecked()] or list(range(7))
+        return {"actif": inter.isChecked(), "debut": debut.time().toString("HH:mm"), "fin": fin.time().toString("HH:mm"),
+                "jours": jours}
+
+    def maj_resume():
+        x = lire_ui()
+        for wdg in [debut, fin, *pastilles]:
+            wdg.setEnabled(x["actif"])
+        if not x["actif"]:
+            resume.setText("Désactivée : la détection tourne à toute heure (selon les interrupteurs de Flux et de "
+                           "chaque caméra). Réglable aussi depuis FluxLite, Flux Remote et l'interface web.")
+            return
+        maintenant = "en ce moment : détection active" if H.dans_plage(x) else "en ce moment : hors plage, détection en pause"
+        prochain = H.prochain_changement(x)
+        resume.setText(f"{H.texte(x)} — {maintenant}"
+                       + (f" jusqu'à {prochain:%H:%M}" + ("" if prochain.date() == __import__('datetime').date.today()
+                                                          else f" ({H.JOURS[prochain.weekday()]})") if prochain else "")
+                       + ". En dehors, les images restent affichées mais rien n'est analysé (ni alerte ni vidéo).")
+
+    def enregistrer(*_):
+        H.enregistrer(cfg, lire_ui())
+        maj_resume()
+
+    MODELES = [("Modèles…", None), ("Journée : 6 h – 22 h", ("06:00", "22:00", range(7))),
+               ("Nuit : 22 h – 6 h", ("22:00", "06:00", range(7))),
+               ("Heures de bureau (lun-ven 8 h – 18 h)", ("08:00", "18:00", range(5))),
+               ("Magasin fermé (20 h – 8 h)", ("20:00", "08:00", range(7))),
+               ("Week-end, toute la journée", ("00:00", "00:00", [5, 6]))]
+    for nom, _ in MODELES:
+        modeles.addItem(nom)
+
+    def appliquer_modele(i):
+        m = MODELES[i][1]
+        if m is None:
+            return
+        d, f, j = m
+        for wdg in [inter, *pastilles]:
+            wdg.blockSignals(True)
+        inter.setChecked(True)
+        debut.setTime(QTime.fromString(d, "HH:mm"))
+        fin.setTime(QTime.fromString(f, "HH:mm"))
+        for k, pa in enumerate(pastilles):
+            pa.setChecked(k in list(j))
+        for wdg in [inter, *pastilles]:
+            wdg.blockSignals(False)
+        enregistrer()
+        modeles.blockSignals(True)
+        modeles.setCurrentIndex(0)
+        modeles.blockSignals(False)
+
+    modeles.currentIndexChanged.connect(appliquer_modele)
+    inter.toggled.connect(enregistrer)
+    debut.editingFinished.connect(enregistrer)
+    fin.editingFinished.connect(enregistrer)
+    debut.timeChanged.connect(lambda *_: maj_resume())
+    fin.timeChanged.connect(lambda *_: maj_resume())
+    for pa in pastilles:
+        pa.toggled.connect(enregistrer)
+    maj_resume()
+
+    def externe(cle, _v):  # changé à distance (FluxLite, Remote, web)
+        if not cle.startswith("horaire."):
+            return
+        x = H.lire(cfg)
+        for wdg, val in ((inter, x["actif"]),):
+            wdg.blockSignals(True)
+            wdg.setChecked(val)
+            wdg.blockSignals(False)
+        for t, val in ((debut, x["debut"]), (fin, x["fin"])):
+            t.blockSignals(True)
+            t.setTime(QTime.fromString(val, "HH:mm"))
+            t.blockSignals(False)
+        for i, pa in enumerate(pastilles):
+            pa.blockSignals(True)
+            pa.setChecked(i in x["jours"])
+            pa.blockSignals(False)
+        maj_resume()
+
+    if hasattr(page, "ecouteurs_entete"):
+        page.ecouteurs_entete.append(externe)
+    return cadre
+
+
+# ---------------------------------------------------------------------------
+# Espace disque
+# ---------------------------------------------------------------------------
+def entete_stockage(page):
+    from PySide6.QtWidgets import QProgressBar
+    from . import stockage
+    fen, cfg = page.fen, page.cfg
+    w, v = _boite()
+    barre = QProgressBar()
+    barre.setTextVisible(False)
+    barre.setFixedHeight(10)
+    titre = etiquette("Calcul de l'espace utilisé…")
+    detail = etiquette("")
+    v.addWidget(titre)
+    v.addWidget(barre)
+    v.addWidget(detail)
+
+    def afficher(e):
+        try:
+            _afficher(e)
+        except RuntimeError:  # encadré fermé entre-temps
+            pass
+
+    def _afficher(e):
+        lim = float(cfg.get("stockage.limite") or 0)
+        t = stockage.texte_taille
+        titre.setText(f"Flux utilise {t(e['total'])}" + (f" sur {t(int(lim * stockage.GO))}" if lim else " (sans limite)")
+                      + (f" · {t(e['libre'])} libres sur le disque" if e["libre"] is not None else ""))
+        barre.setRange(0, 1000)
+        barre.setValue(int(min(1.0, e["total"] / (lim * stockage.GO)) * 1000) if lim else 0)
+        import time as _t
+        ancien = _t.strftime("%d/%m/%Y", _t.localtime(e["plus_ancien"])) if e["plus_ancien"] else "—"
+        detail.setText(f"Vidéos {t(e['videos'])} · photos {t(e['photos'])} · bases (actions, alertes FluxLite) "
+                       f"{t(e['bases'])} · journal {t(e['journal'])} · {e['fichiers']} fichier(s), le plus ancien du {ancien}. "
+                       "Au-delà de la limite, les plus anciens sont supprimés en premier ; les personnes enregistrées, "
+                       "les comptes et les réglages ne sont jamais touchés.")
+
+    def calculer():
+        en_arriere_plan(lambda: stockage.etat(cfg.dossier_sortie(), fen.chemins_bases()), afficher)
+
+    h = QHBoxLayout()
+    b = Bouton("Faire le ménage maintenant", "primaire")
+    b.clicked.connect(lambda: fen.menage_disque(manuel=True))
+    h.addWidget(b)
+    bo = Bouton("Ouvrir le dossier", "discret", "dossier")
+    bo.clicked.connect(lambda: (os.makedirs(cfg.dossier_sortie(), exist_ok=True),
+                                QDesktopServices.openUrl(QUrl.fromLocalFile(cfg.dossier_sortie()))))
+    h.addWidget(bo)
+    h.addStretch(1)
+    v.addLayout(h)
+    try:
+        fen.signal_disque.connect(calculer)
+    except (AttributeError, RuntimeError):
+        pass
+    calculer()
+    return w

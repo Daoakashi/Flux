@@ -367,6 +367,27 @@ class Base:
         if jours and jours > 0:
             self._ecrire("DELETE FROM actions WHERE ts < ?", (time.time() - jours * 86400,))
 
+    def purger_avant(self, ts):
+        """Limite d'espace disque : actions plus anciennes que ts (avec leur photo). Renvoie leur nombre."""
+        return self._ecrire("DELETE FROM actions WHERE ts < ?", (ts,)).rowcount
+
+    def supprimer_plus_anciennes(self, fraction=0.2):
+        """Limite d'espace disque, quand il n'y a plus de fichiers à supprimer : la plus ancienne part des actions,
+        puis la base est compactée pour rendre la place au disque."""
+        with self._lock:
+            n = self._c.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+            k = int(n * fraction)
+            if k <= 0:
+                return 0
+            self._c.execute("DELETE FROM actions WHERE id IN (SELECT id FROM actions ORDER BY ts LIMIT ?)", (k,))
+            self._c.commit()
+            try:
+                self._c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self._c.execute("VACUUM")
+            except sqlite3.Error:
+                pass
+            return k
+
     def exporter_csv(self, chemin, categorie=None, lignes=None, **filtres):
         if lignes is None:
             lignes = self.actions(limite=1_000_000, **filtres)

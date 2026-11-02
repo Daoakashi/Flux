@@ -236,6 +236,45 @@ class Identite:
         return cert.public_key().public_bytes(serialization.Encoding.DER,
                                               serialization.PublicFormat.SubjectPublicKeyInfo)
 
+    def mettre_a_jour_noms(self, noms, ips):
+        """Inscrit dans le certificat les noms (flux.local, domaine personnalisé…) et les adresses de ce PC. La clé
+        privée ne change pas : la clé d'appairage et les téléphones déjà reliés restent valables."""
+        try:
+            import datetime
+            import ipaddress
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes, serialization
+        except ImportError:
+            return False
+        with open(self.chemin_cert, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+        voulus_dns = sorted({n.lower() for n in noms if n})
+        voulus_ip = sorted({ip for ip in ips if ip})
+        try:
+            san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            actuels_dns = sorted(n.lower() for n in san.get_values_for_type(x509.DNSName))
+            actuels_ip = sorted(str(i) for i in san.get_values_for_type(x509.IPAddress))
+        except x509.ExtensionNotFound:
+            actuels_dns, actuels_ip = [], []
+        if actuels_dns == voulus_dns and actuels_ip == voulus_ip:
+            return False
+        with open(self.chemin_cle, "rb") as f:
+            prive = serialization.load_pem_private_key(f.read(), password=None)
+        maintenant = datetime.datetime.now(datetime.timezone.utc)
+        noms_san = [x509.DNSName(n) for n in voulus_dns] + [x509.IPAddress(ipaddress.ip_address(i)) for i in voulus_ip]
+        nouveau = (x509.CertificateBuilder().subject_name(cert.subject).issuer_name(cert.subject)
+                   .public_key(prive.public_key()).serial_number(x509.random_serial_number())
+                   .not_valid_before(maintenant - datetime.timedelta(days=1))
+                   .not_valid_after(maintenant + datetime.timedelta(days=365 * 30))
+                   .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                   .add_extension(x509.SubjectAlternativeName(noms_san), critical=False)
+                   .sign(prive, hashes.SHA256()))
+        tmp = self.chemin_cert + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(nouveau.public_bytes(serialization.Encoding.PEM))
+        os.replace(tmp, self.chemin_cert)
+        return True
+
     def _calculer_cle(self):
         """32 caractères = 160 bits de l'empreinte SHA-256 de la clé publique (ce que le téléphone vérifie)."""
         return base32_crockford(hashlib.sha256(self.spki_der()).digest()[:20])
@@ -573,6 +612,10 @@ class Comptes:
         with self._lock:
             self._c.commit()
 
+    def purger_journal_avant(self, ts):
+        """Limite d'espace disque de Flux : alertes (et leur photo) plus anciennes que ts."""
+        self._x("DELETE FROM journal WHERE heure < ?", (ts,))
+
     def fermer(self):
         with self._lock:
             self._c.close()
@@ -598,12 +641,19 @@ LIBELLES_PILOTAGE["detection.actif"] = "Détection (toutes les caméras)"
 # Commandes ajoutées dans Flux 0.9.1 (Flux Remote) : type de valeur attendu pour chacune
 LIBELLES_PILOTAGE.update({"detection.niveau": "Niveau de scan", "notif.delai": "Délai entre deux notifications",
                           "mail.delai": "Délai entre deux mails"})
+LIBELLES_PILOTAGE["horaire"] = "Plage horaire de la détection"  # Flux 0.10.1 : {actif, debut, fin, jours}
 COMMANDES_CAMERA = {"camera.detection": "détection", "camera.marche": "marche", "camera.clip": "vidéo"}
 NIVEAUX_PILOTABLES = ["rapide", "equilibre", "precis", "maximum"]
 
 
 def valeur_pilotage(cle, valeur):
     """Vérifie et convertit la valeur reçue pour une commande. Lève ErreurServeur si elle est invalide."""
+    if cle == "horaire":
+        from .horaire import valider
+        try:
+            return valider(valeur)
+        except ValueError as e:
+            raise ErreurServeur(f"Plage horaire : {e}.") from None
     if cle == "detection.niveau":
         if valeur not in NIVEAUX_PILOTABLES:
             raise ErreurServeur("Niveau de scan inconnu.")
@@ -1000,6 +1050,10 @@ class ServeurFluxLite:
         self._flux_lock = threading.Lock()
         self.connectes = {}     # compte_id -> heure de la dernière requête
         self.relais = AgentRelais(self)
+        self._mdns = None
+        self._extras = []           # serveurs des ports 443 et 80
+        self.port_standard = False  # l'interface web répond aussi sur le port 443
+        self.erreur_ports = ""
         self._file_journal = queue.Queue()
         threading.Thread(target=self._boucle_journal, daemon=True, name="fluxlite-journal").start()
 
@@ -1023,9 +1077,95 @@ class ServeurFluxLite:
     def en_marche(self):
         return self._httpd is not None
 
+    # --- réseau local : nom, ports standard, DuckDNS ----------------------------------------------
+    def nom_local(self):
+        """« flux.local » (ou le nom choisi), si le nom sur le réseau est activé."""
+        if not self.r("nom_local", True):
+            return ""
+        if self._mdns is not None and self._mdns.nom:
+            return self._mdns.nom
+        from .reseau_local import nom_valide
+        return nom_valide(self.reglage("developpeur.nom_reseau", "flux")) + ".local"
+
+    def domaine(self):
+        from .reseau_local import domaine_valide
+        return domaine_valide(self.reglage("developpeur.domaine", ""))
+
+    def adresses_web(self):
+        """Adresses de l'interface web, de la plus pratique à la plus sûre : nom de domaine, nom local, IP."""
+        port = self.port_actif or int(self.r("port", PORT_DEFAUT))
+        suffixe = "" if self.port_standard else f":{port}"
+        l = []
+        if self.domaine():
+            l.append(f"https://{self.domaine()}{suffixe}/")
+        if self.nom_local():
+            l.append(f"https://{self.nom_local()}{suffixe}/")
+        l += [f"https://{ip}{suffixe}/" for ip in adresses_locales()]
+        return l
+
+    def _demarrer_reseau(self, ctx):
+        from . import reseau_local as rl
+        if self.r("nom_local", True):
+            self._mdns = rl.RepondeurMDNS(self.reglage("developpeur.nom_reseau", "flux"), self.rappel)
+            self._mdns.start()
+        # ports 443 et 80 : adresse sans « :47810 »
+        self.port_standard = False
+        self.erreur_ports = ""
+        choix = self.reglage("developpeur.ports_standard", "auto")
+        if choix != "non" and self.port_actif != 443:
+            try:
+                h = _ServeurHTTPS(("0.0.0.0", 443), _Gestionnaire, ctx, self)
+                self._extras.append(h)
+                threading.Thread(target=h.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True,
+                                 name="fluxlite-443").start()
+                self.port_standard = True
+            except OSError as e:
+                if getattr(e, "errno", None) in (13, 10013):
+                    self.erreur_ports = "ports réservés à l'administrateur"
+                elif getattr(e, "errno", None) in (98, 10048):
+                    self.erreur_ports = "port 443 déjà utilisé par un autre programme"
+                else:
+                    self.erreur_ports = str(e)
+                if choix == "oui":
+                    self.rappel(f"Adresse sans numéro de port impossible ({self.erreur_ports}).", "erreur")
+        if choix != "non":
+            try:
+                h80 = _ServeurRedirection(("0.0.0.0", 80), self)
+                self._extras.append(h80)
+                threading.Thread(target=h80.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True,
+                                 name="fluxlite-80").start()
+            except OSError:
+                pass
+        # DuckDNS : monnom.duckdns.org -> adresse locale de ce PC
+        if self.domaine().endswith(".duckdns.org") and self.reglage("developpeur.duckdns_jeton", ""):
+            threading.Thread(target=self._boucle_duckdns, daemon=True, name="fluxlite-duckdns").start()
+
+    def _boucle_duckdns(self):
+        from . import reseau_local as rl
+        derniere, httpd = None, self._httpd
+        while self._httpd is httpd and httpd is not None:
+            ips = rl.adresses_lan()
+            if ips and ips[0] != derniere:
+                ok, msg = rl.maj_duckdns(self.domaine(), self.reglage("developpeur.duckdns_jeton", ""), ips[0])
+                if ok:
+                    derniere = ips[0]
+                    self.rappel(f"DuckDNS : {self.domaine()} pointe vers {ips[0]}.", "info")
+                else:
+                    self.rappel(f"DuckDNS : {msg}.", "erreur")
+            for _ in range(600):
+                if self._httpd is not httpd:
+                    return
+                time.sleep(1)
+
     def demarrer(self):
         self.arreter()
         port = int(self.r("port", PORT_DEFAUT))
+        try:
+            from . import reseau_local as rl
+            noms = [rl.nom_valide(self.reglage("developpeur.nom_reseau", "flux")) + ".local", self.domaine(), "localhost"]
+            self.identite.mettre_a_jour_noms(noms, adresses_locales() + ["127.0.0.1"])
+        except Exception as e:  # noqa: BLE001 — un certificat sans noms fonctionne quand même
+            self.rappel(f"Certificat : noms non ajoutés ({e}).", "erreur")
         try:
             ctx = self.identite.contexte_tls()
             httpd = _ServeurHTTPS(("0.0.0.0", port), _Gestionnaire, ctx, self)
@@ -1039,6 +1179,10 @@ class ServeurFluxLite:
         self._fil = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True,
                                      name="fluxlite-serveur")
         self._fil.start()
+        try:
+            self._demarrer_reseau(ctx)
+        except Exception as e:  # noqa: BLE001 — l'adresse IP reste utilisable
+            self.rappel(f"Réseau local : {e}", "erreur")
         self.comptes.purger(int(self.r("conservation_journal", 7)))
         if self.r("relais", True):
             self.relais.demarrer()
@@ -1057,6 +1201,18 @@ class ServeurFluxLite:
 
     def arreter(self):
         self.relais.arreter()
+        if self._mdns is not None:
+            self._mdns.arreter()
+            self._mdns = None
+        for x in self._extras:
+            x.arret = True
+            try:
+                x.shutdown()
+                x.server_close()
+            except OSError:
+                pass
+        self._extras = []
+        self.port_standard = False
         h, self._httpd = self._httpd, None
         self.port_actif = None
         if h is not None:
@@ -1161,6 +1317,21 @@ class _ServeurHTTPS(ThreadingHTTPServer):
     def finish_request(self, request, client_address):
         # La poignée de main TLS a lieu ici, dans le fil de la requête : un client lent ne bloque pas les autres.
         request.settimeout(20)
+        # « http://… » tapé à la main (sans s) : le navigateur parle en clair. On le renvoie vers https au lieu de
+        # fermer la connexion (page vide « ERR_EMPTY_RESPONSE »).
+        try:
+            premier = request.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return
+        if premier and premier[0] != 0x16:
+            from .reseau_local import lire_requete_claire, reponse_redirection
+            try:
+                req = lire_requete_claire(request)
+                if req[:4] in (b"GET ", b"HEAD", b"POST", b"PUT ", b"OPTI", b"PATC", b"DELE"):
+                    request.sendall(reponse_redirection(req, self.server_address[1]))
+            except OSError:
+                pass
+            return
         try:
             tls = self.ctx.wrap_socket(request, server_side=True)
         except (ssl.SSLError, OSError):
@@ -1176,6 +1347,29 @@ class _ServeurHTTPS(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         pass  # connexions coupées par le téléphone : normal, rien à signaler
+
+
+class _ServeurRedirection(ThreadingHTTPServer):
+    """Port 80 : tout est renvoyé vers https (port 443 s'il est ouvert, sinon le port de Flux)."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, adresse, appli):
+        self.appli, self.arret = appli, False
+        super().__init__(adresse, BaseHTTPRequestHandler)
+
+    def finish_request(self, request, client_address):
+        from .reseau_local import lire_requete_claire, reponse_redirection
+        try:
+            req = lire_requete_claire(request)
+            if req:
+                port = 443 if self.appli.port_standard else (self.appli.port_actif or PORT_DEFAUT)
+                request.sendall(reponse_redirection(req, port))
+        except OSError:
+            pass
+
+    def handle_error(self, request, client_address):
+        pass
 
 
 class _Gestionnaire(BaseHTTPRequestHandler):
@@ -1555,8 +1749,10 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                               "personnes": int(cam.get("personnes", 0)), "fps": round(float(cam.get("fps", 0)), 1),
                               "resolution": f"{res[0]}×{res[1]}" if res else None,
                               "detection": bool(cam.get("detection", True))})
+        from .horaire import actif_maintenant
         self.json({"cameras": liste, "serveur": self.appli.nom, "entreprise": bool(c.get("entreprise_id")),
                    "detection": bool(self.appli.reglage("detection.actif", True)),
+                   "hors_plage": not actif_maintenant(self.appli.reglages),
                    "pilotage": bool(c.get("pilotage"))})
 
     # --- pilotage à distance ---------------------------------------------------------------------

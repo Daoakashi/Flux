@@ -334,6 +334,7 @@ class PageReglages(QWidget):
         col.setContentsMargins(4, 0, 16, 16)
         col.setSpacing(4)
         self.lignes = {}
+        self.ecouteurs_entete = []  # fonctions (cle, valeur) des encadrés spéciaux de la catégorie affichée
         visibles = {c for c, _ in self._categories_visibles()}
         if texte:
             reglages = [r for r in SCHEMA if r.categorie in visibles and
@@ -404,6 +405,9 @@ class PageReglages(QWidget):
             w = QWidget()
             v = QVBoxLayout(w)
             v.setContentsMargins(0, 0, 0, 0)
+            from .entetes_reglages import entete_horaire
+            v.addWidget(entete_horaire(self))
+            v.addSpacing(6)
             g = QGridLayout()
             g.setSpacing(10)
             self.cartes = []
@@ -437,6 +441,9 @@ class PageReglages(QWidget):
         if cat == "clips":
             from .entetes_reglages import entete_clips
             return entete_clips(page=self)
+        if cat == "stockage":
+            from .entetes_reglages import entete_stockage
+            return entete_stockage(self)
         if cat == "maj":
             from .entetes_reglages import entete_maj
             return entete_maj(self)
@@ -449,6 +456,11 @@ class PageReglages(QWidget):
         ligne = self.lignes.get(cle)
         if ligne is not None:
             ligne.actualiser()
+        for f in list(getattr(self, "ecouteurs_entete", [])):
+            try:
+                f(cle, _v)
+            except RuntimeError:  # encadré déjà détruit
+                pass
         if cle == "apparence.theme":
             for tu in getattr(self, "tuiles", []):
                 tu.setChecked(tu.cle == _v)

@@ -11,7 +11,7 @@
  */
 "use strict";
 (() => {
-  const VERSION_WEB = "2.0";
+  const VERSION_WEB = "2.1";
   const API = "api/v1/";
   const NOMS_NIVEAUX = { alerte: "Alerte", action: "Action", video: "Vidéo" };
   const FEEDBACK_MAIL = "dms.security.list@gmail.com";
@@ -642,6 +642,7 @@
     const d = await api("cameras", { srv });
     srv.cameras = d.cameras.map((c) => ({ ...c, srv: srv.id }));
     srv.detection = d.detection;
+    srv.horsPlage = !!d.hors_plage;
     srv.entreprise = d.entreprise;
     srv.en_ligne = true;
     srv.erreur = "";
@@ -707,7 +708,7 @@
         c.pers.textContent = `${cam.personnes} pers.`;
         c.pers.hidden = cam.etat === "arret";
         c.nomSrv.textContent = plusieurs() ? srv.nom : "";
-        c.infos.textContent = [cam.resolution, cam.fps ? `${cam.fps} i/s` : "", cam.detection ? "" : "sans détection"].filter(Boolean).join(" · ");
+        c.infos.textContent = [cam.resolution, cam.fps ? `${cam.fps} i/s` : "", cam.detection ? (srv.horsPlage && srv.detection ? "hors plage horaire" : "") : "sans détection"].filter(Boolean).join(" · ");
         if (cam.etat !== "arret") rafraichirImage(c.img, srv, `cameras/${cam.id}/image?largeur=640`);
         else { c.img.hidden = true; c.img.nextSibling.hidden = false; }
       }
@@ -1035,6 +1036,42 @@
         return ligneReglage(titre, texte, el("div", { class: "champ", style: "margin:0;display:flex;align-items:center;gap:6px" }, champ, "min"));
       };
 
+      // Plage horaire (Flux 0.10.1) : la détection ne tourne qu'entre deux heures, certains jours
+      function blocHoraire(p) {
+        const h = { ...p.horaire, jours: [...p.horaire.jours] };
+        const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+        const debut = el("input", { type: "time", value: h.debut, "aria-label": "Début", style: "min-height:38px" });
+        const fin = el("input", { type: "time", value: h.fin, "aria-label": "Fin", style: "min-height:38px" });
+        const jours = el("div", { class: "filtres", style: "margin:8px 0 0;gap:6px" }, JOURS.map((j, i) => {
+          const b = el("button", { type: "button", class: "puce" + (h.jours.includes(i) ? " active" : ""), texte: j, "aria-pressed": String(h.jours.includes(i)),
+            onclick: () => {
+              h.jours = h.jours.includes(i) ? h.jours.filter((x) => x !== i) : [...h.jours, i].sort();
+              b.classList.toggle("active", h.jours.includes(i)); b.setAttribute("aria-pressed", String(h.jours.includes(i)));
+            } });
+          return b;
+        }));
+        const enregistrer = async (actif) => {
+          if (!h.jours.length) { toast("Choisissez au moins un jour", "", "erreur"); return; }
+          try {
+            await regler("horaire", { actif, debut: debut.value || "06:00", fin: fin.value || "22:00", jours: h.jours });
+            toast(actif ? "Plage horaire enregistrée" : "Plage horaire désactivée", "", "ok");
+          } catch (e) { toast(e.message, "", "erreur"); }
+          try { srv.pilotage = await api("pilotage", { srv }); } catch { /* garder l'affichage */ }
+          dessiner();
+        };
+        const etatTexte = p.horaire.actif ? `${p.horaire_texte || ""}${p.hors_plage ? " — en ce moment : hors plage (détection en pause)." : " — en ce moment : détection active."}`
+          : "Désactivée : la détection tourne à toute heure.";
+        return el("div", { class: "reglage pile" },
+          el("div", { class: "txt" }, el("b", { texte: "Plage horaire" }), el("span", { texte: etatTexte })),
+          el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:8px" },
+            inter(p.horaire.actif, (v) => enregistrer(v), { libelle: "Plage horaire" }),
+            el("span", { texte: "de", style: "color:var(--texte2)" }), debut, el("span", { texte: "à", style: "color:var(--texte2)" }), fin),
+          jours,
+          el("div", { class: "boutons", style: "margin-top:10px" },
+            el("button", { class: "btn petit principal", type: "button", onclick: () => enregistrer(true) }, "Enregistrer la plage"),
+            el("span", { style: "font-size:12.5px;color:var(--texte3)", texte: "Fin plus tôt que le début = la nuit (22:00 → 06:00)." })));
+      }
+
       zone.replaceChildren(
         el("div", {},
           el("div", { class: "panneau" }, el("h3", { texte: "Aujourd'hui" }),
@@ -1046,7 +1083,8 @@
           el("div", { class: "panneau" }, el("h3", { texte: "Détection" }),
             ligneReglage("Détection", "Toutes les caméras : analyse et alertes.",
               inter(p.detection, async (v) => { await regler("detection.actif", v); dessiner(); }, { libelle: "Détection" })),
-            ligneReglage("Niveau de scan", texteNiveau, niveau, true))),
+            ligneReglage("Niveau de scan", texteNiveau, niveau, true),
+            p.horaire ? blocHoraire(p) : null)),
         el("div", {},
           el("div", { class: "panneau" }, el("h3", { texte: "Caméras" }),
             p.cameras.length ? p.cameras.map((c) => el("div", { class: "reglage" },

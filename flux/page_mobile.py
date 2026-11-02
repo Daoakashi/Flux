@@ -22,7 +22,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
 
 from . import mobile_serveur as ms
 from .config import RACINE
+
+RESEAU_LOCAL = {"fluxlite.nom_local", "developpeur.nom_reseau", "developpeur.domaine", "developpeur.duckdns_jeton",
+                "developpeur.ports_standard"}
 from .theme import C, T, couleur
+from .taches import en_arriere_plan
 from .widgets import Bouton, Interrupteur, etiquette
 
 TEXTE_PILOTAGE = ("Depuis FluxLite, ce compte pourra activer ou désactiver la détection (de ses caméras ou de "
@@ -139,7 +143,10 @@ class Pilote(ms.PiloteVide):
         except Exception:  # noqa: BLE001
             stats = {}
         info = getattr(self.page.fen, "info_appareil", {}) or {}
+        from . import horaire as H
+        plage = H.lire(cfg)
         return {"detection": bool(cfg.get("detection.actif")), "cameras": cameras, "canaux": canaux,
+                "horaire": plage, "horaire_texte": H.texte(plage), "hors_plage": not H.dans_plage(plage),
                 "niveau": cfg.get("detection.niveau"),
                 "niveaux": [{"cle": k, "nom": NIVEAUX[k]["nom"], "texte": NIVEAUX[k]["texte"]} for k in ms.NIVEAUX_PILOTABLES],
                 "delais": {"notif.delai": cfg.get("notif.delai"), "mail.delai": cfg.get("mail.delai")},
@@ -173,6 +180,13 @@ class Pilote(ms.PiloteVide):
             fen.page_cameras_niveaux()
             from .config import NIVEAUX
             texte = f"Pilotage à distance — {auteur} a choisi le niveau de scan {NIVEAUX[valeur]['nom']}."
+            fen.log_systeme(texte, "info", "FluxLite")
+            fen.toast(texte)
+            return
+        elif cle == "horaire":
+            from . import horaire as H
+            H.enregistrer(cfg, valeur)
+            texte = f"Pilotage à distance — {auteur} a réglé la plage horaire de la détection : {H.texte(valeur)}."
             fen.log_systeme(texte, "info", "FluxLite")
             fen.toast(texte)
             return
@@ -477,7 +491,17 @@ class PageFluxLite(QWidget):
             self.serveur.fermer()
 
     def reglage_change(self, cle):
-        if self.serveur is None or not cle.startswith("fluxlite."):
+        if self.serveur is None:
+            return
+        if cle in RESEAU_LOCAL:  # nom sur le réseau, domaine, ports : le serveur repart (après la frappe)
+            if self.serveur.en_marche():
+                if not hasattr(self, "_timer_reseau"):
+                    self._timer_reseau = QTimer(self)
+                    self._timer_reseau.setSingleShot(True)
+                    self._timer_reseau.timeout.connect(lambda: (self.demarrer(), self._rafraichir_identite()))
+                self._timer_reseau.start(1500)
+            return
+        if not cle.startswith("fluxlite."):
             return
         if cle == "fluxlite.actif":
             self.demarrer() if self.cfg.get(cle) else self.arreter()
@@ -609,8 +633,21 @@ class PageFluxLite(QWidget):
         self.b_web_copier = Bouton("Copier l'adresse web")
         self.b_web_copier.clicked.connect(lambda: self._copier(self._adresse_web()))
         hw.addWidget(self.b_web_copier)
+        self.b_pare_feu = Bouton("Autoriser dans le pare-feu", "discret", "bouclier")
+        self.b_pare_feu.setToolTip("Si un autre appareil du réseau n'arrive pas à ouvrir Flux : autorise ses ports dans "
+                                   "le pare-feu de ce PC (une seule fois, avec la confirmation d'un administrateur).")
+        self.b_pare_feu.clicked.connect(self._autoriser_pare_feu)
+        hw.addWidget(self.b_pare_feu)
+        self.b_ports = Bouton("Autoriser l'adresse sans port", "discret")
+        self.b_ports.setToolTip("Linux : permet à Flux d'écouter sur les ports 80 et 443 (https://flux.local sans "
+                                "« :47810 »). Demande le mot de passe administrateur une seule fois.")
+        self.b_ports.clicked.connect(self._autoriser_ports)
+        self.b_ports.hide()
+        hw.addWidget(self.b_ports)
         hw.addStretch(1)
         gv.addLayout(hw)
+        self.lbl_pare_feu = etiquette("", "aide")
+        gv.addWidget(self.lbl_pare_feu)
         gv.addSpacing(6)
         ligne = QHBoxLayout()
         s = QLabel("ACCÈS HORS WIFI")
@@ -738,7 +775,17 @@ class PageFluxLite(QWidget):
 
     def _adresse_web(self, local=False):
         port = self.cfg.get("fluxlite.port")
-        return f"https://{'127.0.0.1' if local else ms.adresses_locales()[0]}:{port}/"
+        if local:
+            return f"https://127.0.0.1:{port}/"
+        if self.serveur is not None and self.serveur.en_marche():
+            return self.serveur.adresses_web()[0]
+        return f"https://{ms.adresses_locales()[0]}:{port}/"
+
+    def _ports_pare_feu(self):
+        p = [int(self.cfg.get("fluxlite.port"))]
+        if self.cfg.get("developpeur.ports_standard") != "non":
+            p += [443, 80]
+        return p
 
     def _rafraichir_web(self):
         actif = bool(self.cfg.get("fluxlite.web"))
@@ -747,10 +794,62 @@ class PageFluxLite(QWidget):
         if not actif:
             self.lbl_web.setText("Désactivée (Réglages › FluxLite › Interface web).")
             return
-        self.lbl_web.setText(f"Dans le navigateur d'un PC, d'une tablette ou d'un téléphone du même réseau :\n"
-                             f"{self._adresse_web()}\n\nMêmes comptes que FluxLite. À la première visite, le "
+        srv = self.serveur if self.serveur is not None and self.serveur.en_marche() else None
+        adresses = srv.adresses_web() if srv else [self._adresse_web()]
+        lignes = "\n".join(adresses[:4])
+        note_nom = ""
+        if srv and srv.nom_local():
+            note_nom = (f"\n\n« {srv.nom_local()} » fonctionne sur les PC Windows 10/11, Mac, iPhone et Linux du réseau. "
+                        "Sur Android, utilisez l'adresse en chiffres (ou un nom DuckDNS, Réglages › Développeur).")
+        if srv and not srv.port_standard and srv.erreur_ports and self.cfg.get("developpeur.ports_standard") != "non":
+            note_nom += f"\nAdresse sans « :{srv.port_actif} » indisponible : {srv.erreur_ports}."
+        self.lbl_web.setText("Dans le navigateur d'un PC, d'une tablette ou d'un téléphone du même réseau :\n"
+                             f"{lignes}{note_nom}\n\nMêmes comptes que FluxLite. À la première visite, le "
                              "navigateur prévient que le certificat est « non reconnu » : c'est normal, il est créé "
                              "par ce PC. Choisissez « Avancé › Continuer » (ou « Accepter le risque »).")
+        import sys as _sys
+        from . import reseau_local as rl
+        besoin_ports = (_sys.platform.startswith("linux") and srv is not None and not srv.port_standard
+                        and "administrateur" in (srv.erreur_ports or "")
+                        and (rl.premier_port_libre_linux() or 1024) > 80)
+        self.b_ports.setVisible(bool(besoin_ports))
+        if not getattr(self, "_pare_feu_lu", False):
+            self._pare_feu_lu = True
+            en_arriere_plan(lambda: rl.etat_pare_feu(self._ports_pare_feu()), self._afficher_pare_feu)
+
+    def _afficher_pare_feu(self, e):
+        self._pare_feu = e
+        self.lbl_pare_feu.setText(e.get("texte", ""))
+        self.b_pare_feu.setVisible(e.get("systeme") in ("Windows", "ufw", "firewalld") and e.get("regle") is not True)
+
+    def _autoriser_pare_feu(self):
+        from . import reseau_local as rl
+        e = getattr(self, "_pare_feu", None) or {}
+        self.b_pare_feu.setEnabled(False)
+        self.fen.toast("Confirmez l'autorisation dans la fenêtre du système…")
+
+        def fini(r):
+            ok, msg = r
+            self.b_pare_feu.setEnabled(True)
+            self.fen.toast(msg, "ok" if ok else "erreur")
+            self.fen.log_systeme(f"Pare-feu : {msg}", "info" if ok else "erreur")
+            self._pare_feu_lu = False
+            self._rafraichir_web()
+
+        en_arriere_plan(lambda: rl.autoriser_pare_feu(e.get("systeme"), self._ports_pare_feu()), fini)
+
+    def _autoriser_ports(self):
+        from . import reseau_local as rl
+
+        def fini(r):
+            ok, msg = r
+            self.fen.toast(msg, "ok" if ok else "erreur")
+            self.fen.log_systeme(f"Ports 80 et 443 : {msg}", "info" if ok else "erreur")
+            if ok and self.serveur is not None and self.serveur.en_marche():
+                self.demarrer()
+                self._rafraichir_identite()
+
+        en_arriere_plan(rl.autoriser_ports_linux, fini)
 
     def _rafraichir_identite(self):
         self._rafraichir_web()
@@ -760,8 +859,10 @@ class PageFluxLite(QWidget):
         adresses = ms.adresses_locales()
         self.lbl_cle.setText(self.serveur.identite.cle_affichee)
         self.qr.definir(self.serveur.lien(adresses, port))
+        nom_local = self.serveur.nom_local() if self.serveur.en_marche() else ""
         self.lbl_adresses.setText(f"Nom : {self.serveur.nom}\n\nAdresse sur ce réseau :\n"
-                                  + "\n".join(f"{a}:{port}" for a in adresses))
+                                  + "\n".join(f"{a}:{port}" for a in adresses)
+                                  + (f"\n{nom_local}:{port}" if nom_local else ""))
 
     def _rafraichir_etat(self):
         if self.serveur is None:

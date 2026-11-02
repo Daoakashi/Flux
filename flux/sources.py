@@ -712,8 +712,9 @@ class Detecteur(threading.Thread):
         self.stop_event.set()
 
     def detection_active(self):
-        """Interrupteur général (Réglages › Détection ou FluxLite) et interrupteur de la caméra."""
-        return bool(self.cfg.get("detection.actif")) and bool(self.o.get("detection", True))
+        """Interrupteur général (Réglages › Détection ou FluxLite), interrupteur de la caméra et plage horaire."""
+        from .horaire import actif_maintenant
+        return bool(self.cfg.get("detection.actif")) and bool(self.o.get("detection", True)) and actif_maintenant(self.cfg)
 
     def annotations_vides(self, frame):
         h, w = frame.shape[:2]

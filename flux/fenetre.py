@@ -428,6 +428,8 @@ class DialogueMaj(QDialog):
 
 
 class FenetrePrincipale(QMainWindow):
+    signal_disque = Signal()  # le ménage du disque est terminé (pour rafraîchir Réglages › Espace disque)
+
     def __init__(self, cfg, base, info=None):
         super().__init__()
         self.cfg, self.base = cfg, base
@@ -486,6 +488,11 @@ class FenetrePrincipale(QMainWindow):
         from . import clips
         self._tache_purge = Tache(clips.purger, os.path.join(cfg.dossier_sortie(), "videos"),
                                   cfg.get("clips.conservation")).lancer()
+        # Limite d'espace disque : les plus anciens enregistrements partent en premier
+        self._timer_disque = QTimer(self)
+        self._timer_disque.timeout.connect(self.menage_disque)
+        self._timer_disque.start(max(1, int(cfg.get("stockage.intervalle") or 10)) * 60 * 1000)
+        QTimer.singleShot(60 * 1000, self.menage_disque)
         m = cfg.section("mail")
         if m["actif"] and m["utilisateur"] and not m["mot_de_passe"]:
             self.log_systeme("Mails activés, mais le mot de passe n'est pas mémorisé : ressaisissez-le dans "
@@ -786,13 +793,59 @@ class FenetrePrincipale(QMainWindow):
             self._maj_barre_etat()
         if cle.startswith("developpeur."):
             self.appliquer_identite()
-        if cle.startswith("fluxlite."):
+        if cle.startswith("fluxlite.") or cle in ("developpeur.nom_reseau", "developpeur.domaine",
+                                                  "developpeur.duckdns_jeton", "developpeur.ports_standard"):
             self.page_mobile.reglage_change(cle)
+        if cle.startswith("horaire."):
+            from .horaire import oublier_cache
+            oublier_cache()
+            self._maj_barre_etat()
+        if cle.startswith("stockage."):
+            QTimer.singleShot(1500, self.menage_disque)
         if cle == "detection.actif":
             self.page_cameras.p_detection.regler(bool(valeur))
             self.toast("Détection activée sur toutes les caméras." if valeur else
                        "Détection désactivée : les caméras restent affichées, sans alerte.", "ok" if valeur else "info")
             self._maj_barre_etat()
+
+    def chemins_bases(self):
+        from .config import FICHIER_BASE
+        l = [FICHIER_BASE]
+        srv = getattr(self.page_mobile, "serveur", None)
+        if srv is not None:
+            l.append(os.path.join(srv.dossier, "comptes.db"))
+        return l
+
+    def menage_disque(self, manuel=False):
+        """Supprime les plus anciens enregistrements si Flux dépasse sa limite d'espace (dans un fil à part)."""
+        if getattr(self, "_menage_en_cours", False):
+            return
+        from . import stockage
+        cfg = self.cfg
+        if not manuel and not (cfg.get("stockage.limite") or cfg.get("stockage.libre_min")):
+            return
+        self._menage_en_cours = True
+        srv = getattr(self.page_mobile, "serveur", None)
+        t = Tache(stockage.menage, cfg.dossier_sortie(), float(cfg.get("stockage.limite") or 0),
+                  float(cfg.get("stockage.libre_min") or 0), self.base, getattr(srv, "comptes", None),
+                  self.chemins_bases())
+
+        def fini(r):
+            self._menage_en_cours = False
+            texte = stockage.texte_resume(r)
+            if texte:
+                self.log_systeme(texte, "info")
+            elif manuel:
+                self.toast("Espace disque : rien à supprimer, Flux est sous sa limite.", "ok")
+            self.signal_disque.emit()
+
+        def echec(e):
+            self._menage_en_cours = False
+            self.log_systeme(f"Espace disque : ménage impossible ({e}).", "erreur")
+
+        t.fini.connect(fini)
+        t.echec.connect(echec)
+        self._tache_disque = t.lancer()
 
     def appliquer_identite(self):
         """Nom, titre, version et logo (personnalisables en mode développeur)."""
@@ -962,8 +1015,21 @@ class FenetrePrincipale(QMainWindow):
             self.st_appareil.setText(f"Calcul : {nom} · {moteur}" + ("" if i.get("cuda") or i.get("mps") else
                                                                     " (pas de carte NVIDIA)"))
         _, _, _, lib = niveau_effectif(self.cfg.get("detection.niveau"), self.cfg)
-        if self.cfg.get("detection.actif"):
-            self.st_niveau.setText(f"Niveau : {lib}")
+        from . import horaire as H
+        plage = H.lire(self.cfg)
+        dans = H.actif_maintenant(self.cfg)
+        if plage["actif"] and getattr(self, "_dans_plage", None) is not None and dans != self._dans_plage \
+                and self.cfg.get("detection.actif"):
+            self.log_systeme(("Plage horaire : la détection reprend. " if dans else
+                              "Plage horaire : la détection se met en pause (les images restent affichées). ")
+                             + H.texte(plage) + ".", "info")
+        self._dans_plage = dans
+        if self.cfg.get("detection.actif") and not dans:
+            p = H.prochain_changement(plage)
+            self.st_niveau.setText("Hors plage horaire" + (f" · reprise à {p:%H:%M}" if p else ""))
+            self.st_niveau.setStyleSheet(f"color: {C['attention']}; font-weight: 600;")
+        elif self.cfg.get("detection.actif"):
+            self.st_niveau.setText(f"Niveau : {lib}" + ("  ·  plage horaire" if plage["actif"] else ""))
             self.st_niveau.setStyleSheet("")
         else:
             self.st_niveau.setText("Détection désactivée")

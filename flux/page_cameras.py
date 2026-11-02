@@ -699,7 +699,8 @@ class PageFlux(QWidget):
             if ann.get("basse_lumiere"):
                 badges.append("Basse lumière")
             if actif and d.detection_coupee:
-                badges.append("Détection désactivée")
+                from .horaire import actif_maintenant
+                badges.append("Hors plage horaire" if not actif_maintenant(self.cfg) else "Détection désactivée")
             if visible and img is not None and img is not self._img_ref:
                 self._img_ref = img
                 self._ann_ref = d.annotations
@@ -714,7 +715,9 @@ class PageFlux(QWidget):
             if etat in ("direct", "alerte") and d is not None:
                 delai = getattr(self.video, "delai_affichage", 0.0)
                 res = f"{d.resolution[0]}×{d.resolution[1]} · " if d.resolution else ""
-                analyse = ("détection désactivée" if d.detection_coupee else
+                from .horaire import actif_maintenant
+                analyse = ("hors plage horaire" if d.detection_coupee and not actif_maintenant(self.cfg) else
+                           "détection désactivée" if d.detection_coupee else
                            "analyse en veille (rien ne bouge)" if d.veille else
                            f"analyse {d.pipeline.temps_analyse * 1000:.0f} ms ({d.fps_analyse:.0f}/s)")
                 moteur = {"openvino": " · OpenVINO", "onnx": " · ONNX"}.get(d.pipeline.moteur, "")
