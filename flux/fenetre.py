@@ -292,6 +292,11 @@ class APropos(QDialog):
             bg.setToolTip(f"https://github.com/{d}")
             bg.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://github.com/{d}")))
             h2.addWidget(bg)
+        if fen.kiosque:  # pour les postes sans clavier : Ctrl+Alt+Maj+Q n'est pas accessible à la souris
+            bk = Bouton("Quitter le kiosque", "discret")
+            bk.setToolTip("Demande le code administrateur (le clavier visuel permet de le saisir à la souris)")
+            bk.clicked.connect(lambda: (self.accept(), QTimer.singleShot(0, fen.quitter_kiosque)))
+            h2.addWidget(bk)
         h2.addStretch(1)
         bf = Bouton("Fermer", "primaire")
         bf.clicked.connect(self.accept)
@@ -436,6 +441,8 @@ class FenetrePrincipale(QMainWindow):
         self.kiosque = kiosque.actif()
         self._sortie_kiosque = False
         self.info_appareil = info or {}
+        from .clavier import GestionClavier
+        self.clavier = GestionClavier(QApplication.instance(), cfg, self)
         self.setWindowIcon(icone_application())
         # Assez petit pour un portable 1366 × 768 agrandi à 125-150 % : les pages s'adaptent (barre réduite,
         # options sous la vidéo, barres d'outils sur deux lignes).
@@ -604,6 +611,12 @@ class FenetrePrincipale(QMainWindow):
         self.st_reseau.setCursor(Qt.CursorShape.PointingHandCursor)
         self.st_reseau.setToolTip("Réseau : cliquez pour choisir un WiFi")
         self.st_reseau.mousePressEvent = lambda _e: self.ouvrir_reseau()
+        self.st_clavier = QLabel("⌨ Clavier")
+        self.st_clavier.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.st_clavier.setToolTip("Ouvrir ou fermer le clavier visuel (écrire à la souris)")
+        self.st_clavier.mousePressEvent = lambda _e: self.clavier.basculer()
+        self.st_clavier.setVisible(self.kiosque or self.cfg.get("clavier.mode") != "non")
+        sb.addPermanentWidget(self.st_clavier)
         sb.addPermanentWidget(self.st_reseau)
         sb.addPermanentWidget(self.st_maj)
         sb.addPermanentWidget(self.st_notif)
@@ -674,6 +687,9 @@ class FenetrePrincipale(QMainWindow):
                 self.st_reseau.setStyleSheet("")
             elif e.get("cable"):
                 self.st_reseau.setText("Réseau : câble")
+                self.st_reseau.setStyleSheet("")
+            elif e.get("autre"):
+                self.st_reseau.setText(f"Réseau : {e['autre']}")
                 self.st_reseau.setStyleSheet("")
             else:
                 self.st_reseau.setText("Pas de réseau")
@@ -841,6 +857,9 @@ class FenetrePrincipale(QMainWindow):
         if cle.startswith("fluxlite.") or cle in ("developpeur.nom_reseau", "developpeur.domaine",
                                                   "developpeur.duckdns_jeton", "developpeur.ports_standard"):
             self.page_mobile.reglage_change(cle)
+        if cle.startswith("clavier.") and getattr(self, "clavier", None) is not None:
+            self.clavier.reglages_changes()
+            self.st_clavier.setVisible(self.kiosque or valeur != "non" if cle == "clavier.mode" else self.st_clavier.isVisible())
         if cle.startswith("horaire."):
             from .horaire import oublier_cache
             oublier_cache()

@@ -98,6 +98,8 @@ après une mise à jour, et l'écran ne se met jamais en veille.
     connexion : choisissez votre session habituelle (Cinnamon) pour retrouver le bureau.
   Réseau WiFi dans le kiosque : bouton « Réseau » en bas de la barre de gauche de Flux (code
   administrateur demandé pour changer de réseau).
+  Sans clavier (souris seule, écran tactile) : Réglages › Apparence › Clavier visuel, ou bouton
+  « ⌨ Clavier » de la barre d'état. Pour quitter le kiosque à la souris : À propos › Quitter le kiosque.
   Désactiver pour de bon :  sudo bash kiosque.sh desactiver
   Changer le code :         sudo bash kiosque.sh code
   Vérifier :                bash kiosque.sh etat

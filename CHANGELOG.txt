@@ -1,3 +1,19 @@
+Beta Version 0.10.3 alpha
++ Ajouts
+  - Clavier visuel (Réglages › Apparence) : écrire à la souris ou au doigt, pour un poste sans clavier,
+    un kiosque ou un écran tactile. « Sur demande » : un bouton Clavier apparaît quand on clique dans
+    un champ de texte ; « Automatique » : le clavier s'ouvre tout seul. Fonctionne aussi pour les mots
+    de passe (WiFi, code administrateur) et reste utilisable quand une fenêtre s'ouvre par-dessus
+    (code du kiosque, messages). AZERTY ou QWERTY, majuscules et verrouillage, chiffres et symboles,
+    lettres accentuées, trois tailles, déplaçable. Bouton « ⌨ Clavier » dans la barre d'état.
+  - « À propos » en mode kiosque : bouton « Quitter le kiosque », pour sortir sans clavier physique
+    (le code administrateur se tape avec le clavier visuel).
+  - Réseau : bouton « Détails » (réponses du système) à copier dans un Feedback si l'état affiché est faux.
+* Corrections
+  - Réseau : « pas connecté » affiché alors que le PC l'était, avec deux cartes WiFi (carte interne
+    plus clé USB, ou carte « indisponible » listée en premier). Flux lit maintenant la carte réellement
+    connectée et reconnaît aussi les connexions par câble USB, partage de téléphone ou clé 4G.
+
 Beta Version 0.10.2 alpha
 + Ajouts
   - Bouton « Réseau » (en bas de la barre de gauche) et indicateur WiFi dans la barre d'état : choisir un

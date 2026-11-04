@@ -141,6 +141,15 @@ SCHEMA = [
        ("1.1", "110 %"), ("1.25", "125 %"), ("1.5", "150 %"), ("1.75", "175 %"), ("2", "200 %")]),
     R("apparence.ecran_demarrage", "apparence", "Écran de démarrage", "bool", True),
     R("apparence.opacite", "apparence", "Opacité de la fenêtre", "int", 100, "", None, 70, 100, 1, " %", True),
+    R("clavier.mode", "apparence", "Clavier visuel", "choix", "non",
+      "Un clavier à l'écran, utilisable à la souris ou au doigt : pratique en mode kiosque, sur un poste sans clavier "
+      "ou avec un écran tactile. « Sur demande » : un petit bouton Clavier apparaît quand vous cliquez dans un champ "
+      "de texte (mots de passe compris). Le bouton ⌨ de la barre d'état l'ouvre à tout moment.",
+      [("non", "Désactivé"), ("demande", "Sur demande (bouton Clavier)"), ("auto", "Automatique (s'ouvre tout seul)")]),
+    R("clavier.disposition", "apparence", "Disposition du clavier visuel", "choix", "azerty", "",
+      [("azerty", "AZERTY (Belgique, France)"), ("qwerty", "QWERTY")]),
+    R("clavier.taille", "apparence", "Taille du clavier visuel", "choix", "moyen", "",
+      [("petit", "Petit"), ("moyen", "Moyen"), ("grand", "Grand (écran tactile)")]),
 
     # --- Détection ---------------------------------------------------------------------
     R("detection.actif", "detection", "Détection active", "bool", True,

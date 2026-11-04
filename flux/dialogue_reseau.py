@@ -23,6 +23,8 @@ def texte_etat(e, internet=None):
                         + (f" · {e['ip']}" if e.get("ip") else ""))
     if e.get("cable"):
         morceaux.append("Câble réseau branché" + (f" · {e['ip_cable']}" if e.get("ip_cable") else ""))
+    elif e.get("autre"):
+        morceaux.append(f"Connecté par {e['autre']}" + (f" · {e['ip_cable']}" if e.get("ip_cable") else ""))
     if not morceaux:
         morceaux.append("WiFi désactivé" if e.get("wifi_present") and not e.get("wifi_actif") else
                         "Aucune carte WiFi trouvée" if not e.get("wifi_present") and not e.get("cable") else
@@ -97,6 +99,10 @@ class DialogueReseau(QDialog):
         self.b_actualiser.clicked.connect(lambda: self.actualiser(True))
         for b in (self.b_connecter, self.b_deconnecter, self.b_oublier, self.b_cache, self.b_actualiser):
             hb.addWidget(b)
+        self.b_details = Bouton("Détails", "discret")
+        self.b_details.setToolTip("Ce que le système répond (à copier pour signaler un problème)")
+        self.b_details.clicked.connect(self._details)
+        hb.addWidget(self.b_details)
         hb.addStretch(1)
         fermer = Bouton("Fermer")
         fermer.clicked.connect(self.accept)
@@ -287,6 +293,32 @@ class DialogueReseau(QDialog):
             return
         self._executer(f"Connexion à « {ssid.strip()} »…", rw.connecter, f"connecté au WiFi « {ssid.strip()} »",
                        ssid.strip(), mdp or None, True)
+
+    def _details(self):
+        from PySide6.QtWidgets import QApplication, QPlainTextEdit
+
+        def afficher(texte):
+            d = QDialog(self)
+            d.setWindowTitle("Réseau : détails techniques")
+            d.resize(720, 480)
+            v = QVBoxLayout(d)
+            zone = QPlainTextEdit(texte)
+            zone.setReadOnly(True)
+            v.addWidget(etiquette("Réponses du système, telles que Flux les lit. En cas d'affichage faux, copiez-les "
+                                  "dans un Feedback.", "aide"))
+            v.addWidget(zone, 1)
+            h = QHBoxLayout()
+            h.addStretch(1)
+            c = Bouton("Copier", "discret")
+            c.clicked.connect(lambda: (QApplication.clipboard().setText(texte), self.fen.toast("Détails copiés.", "ok")))
+            f = Bouton("Fermer", "primaire")
+            f.clicked.connect(d.accept)
+            h.addWidget(c)
+            h.addWidget(f)
+            v.addLayout(h)
+            d.exec()
+
+        en_arriere_plan(rw.diagnostic, afficher, lambda e: self.lbl_info.setText(f"Détails indisponibles : {e}"))
 
     def _radio(self, actif):
         if not self._autoriser():

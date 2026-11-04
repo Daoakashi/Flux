@@ -89,18 +89,28 @@ def _message_nm(texte):
     return texte.splitlines()[-1][:200] if texte.strip() else "erreur inconnue"
 
 
-def _carte_wifi():
+def _appareils():
+    """[(appareil, type, état, connexion)] ; l'état « connected (externally) » ou « connected (site only) » compte
+    comme connecté."""
     code, out, _ = _nm(["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"])
-    wifi = cable = None
-    for l in out.splitlines():
-        c = _champs(l)
-        if len(c) < 4:
-            continue
-        if c[1] == "wifi" and wifi is None:
-            wifi = {"appareil": c[0], "etat": c[2], "connexion": c[3]}
-        if c[1] == "ethernet" and c[2] == "connected":
-            cable = {"appareil": c[0], "connexion": c[3]}
-    return wifi, cable
+    l = []
+    for ligne in out.splitlines():
+        c = _champs(ligne)
+        if len(c) >= 4:
+            l.append((c[0], c[1], c[2], c[3]))
+    return code, l
+
+
+def _carte_wifi():
+    """La carte WiFi connectée (s'il y en a plusieurs, par exemple une clé USB en plus de la carte du PC), sinon la
+    première ; et le câble réseau branché, s'il y en a un."""
+    _, l = _appareils()
+    wifis = [x for x in l if x[1] == "wifi"]
+    connectees = [x for x in wifis if x[2].startswith("connected")]
+    w = (connectees or wifis or [None])[0]
+    cable = next((x for x in l if x[1] == "ethernet" and x[2].startswith("connected")), None)
+    wifi = {"appareil": w[0], "etat": "connected" if w[2].startswith("connected") else w[2], "connexion": w[3]} if w else None
+    return wifi, ({"appareil": cable[0], "connexion": cable[3]} if cable else None)
 
 
 def _ip(appareil):
@@ -125,21 +135,89 @@ def _connus_linux():
     return connus
 
 
+def _ip_systeme():
+    """Adresse locale utilisée pour sortir (sans rien envoyer)."""
+    try:
+        so = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        so.connect(("192.0.2.1", 9))
+        ip = so.getsockname()[0]
+        so.close()
+        return "" if ip.startswith("127.") else ip
+    except OSError:
+        return ""
+
+
+def _etat_sans_nm():
+    """Linux sans NetworkManager joignable : on lit le noyau (/sys) et iwgetid."""
+    e = {"wifi_present": False, "wifi_actif": True, "ssid": "", "signal": None, "ip": "", "cable": False, "ip_cable": "",
+         "appareil": None, "autre": ""}
+    try:
+        for nom in os.listdir("/sys/class/net"):
+            if os.path.isdir(f"/sys/class/net/{nom}/wireless"):
+                e["wifi_present"], e["appareil"] = True, nom
+    except OSError:
+        pass
+    if shutil.which("iwgetid"):
+        try:
+            r = subprocess.run(["iwgetid", "-r"], capture_output=True, text=True, timeout=5)
+            e["ssid"] = r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    ip = _ip_systeme()
+    if e["ssid"]:
+        e["ip"] = ip
+    elif ip:
+        e["autre"], e["ip_cable"] = "réseau", ip
+    return e
+
+
 def _etat_linux():
-    code, radio, _ = _nm(["-t", "-f", "WIFI", "radio"])
+    code, appareils = _appareils()
+    if code != 0 and not appareils:
+        return _etat_sans_nm()
+    _, radio, _ = _nm(["-t", "-f", "WIFI", "radio"])
     wifi, cable = _carte_wifi()
-    e = {"wifi_present": wifi is not None, "wifi_actif": radio.strip() == "enabled", "ssid": "", "signal": None, "ip": "",
-         "cable": bool(cable), "ip_cable": _ip(cable["appareil"]) if cable else "", "appareil": wifi and wifi["appareil"]}
+    e = {"wifi_present": wifi is not None, "wifi_actif": radio.strip() != "disabled", "ssid": "", "signal": None, "ip": "",
+         "cable": bool(cable), "ip_cable": _ip(cable["appareil"]) if cable else "", "appareil": wifi and wifi["appareil"],
+         "autre": ""}
     if wifi and wifi["etat"] == "connected":
-        _, out, _ = _nm(["-t", "-f", "ACTIVE,SSID,SIGNAL", "device", "wifi", "list", "--rescan", "no"])
+        _, out, _ = _nm(["-t", "-f", "ACTIVE,SSID,SIGNAL", "device", "wifi", "list", "ifname", wifi["appareil"],
+                         "--rescan", "no"])
         for l in out.splitlines():
             c = _champs(l)
             if len(c) >= 3 and c[0] == "yes":
                 e["ssid"], e["signal"] = c[1], int(c[2]) if c[2].isdigit() else None
                 break
-        e["ssid"] = e["ssid"] or wifi["connexion"]
-        e["ip"] = _ip(wifi["appareil"])
+        e["ssid"] = e["ssid"] or wifi["connexion"] or "réseau WiFi"
+        e["ip"] = _ip(wifi["appareil"]) or _ip_systeme()
+    elif not cable:
+        # Connecté autrement (clé 4G, partage de connexion USB, pont, VPN…) : on le dit au lieu de « pas connecté »
+        autre = next((x for x in appareils if x[2].startswith("connected") and x[1] not in ("loopback", "wifi-p2p", "bridge",
+                                                                                            "tun", "wireguard")), None)
+        if autre:
+            e["autre"] = {"gsm": "clé ou modem 4G", "ethernet": "câble"}.get(autre[1], autre[1])
+            e["ip_cable"] = _ip(autre[0]) or _ip_systeme()
     return e
+
+
+def diagnostic():
+    """Sorties brutes des commandes réseau (pour comprendre un affichage faux)."""
+    lignes = [f"Système : {sys.platform}"]
+    cmds = ([["netsh", "wlan", "show", "interfaces"], ["netsh", "wlan", "show", "networks"]] if WINDOWS else
+            [["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"], ["nmcli", "-t", "-f", "RUNNING,STATE,WIFI", "general"],
+             ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "device", "wifi", "list", "--rescan", "no"], ["iwgetid", "-r"]])
+    for c in cmds:
+        try:
+            code, out, err = _cmd(c, 10)
+            lignes.append(f"$ {' '.join(c)}   (code {code})\n{(out or err).strip()}")
+        except ErreurReseau as e:
+            lignes.append(f"$ {' '.join(c)}\n{e}")
+    lignes.append(f"Adresse de sortie : {_ip_systeme() or 'aucune'}")
+    try:
+        lignes.append(f"État lu par Flux : {etat()}")
+    except Exception as e:  # noqa: BLE001
+        lignes.append(f"État lu par Flux : erreur {e}")
+    return "\n\n".join(lignes)
 
 
 def _reseaux_linux(balayer=True):
@@ -244,12 +322,13 @@ def _valeur(texte, *cles):
 
 def _etat_windows():
     _, out, _ = _cmd(["netsh", "wlan", "show", "interfaces"])
-    ssid = _valeur(out, "ssid")
+    ssid = _valeur(out, "ssid", "nom du ssid")
     sig = _valeur(out, "signal")
     m = re.search(r"\d+", sig)
     return {"wifi_present": "ssid" in out.lower() or "interface" in out.lower(), "wifi_actif": True, "ssid": ssid,
-            "signal": int(m.group()) if m else None, "ip": _ip_windows() if ssid else "", "cable": False, "ip_cable": "",
-            "appareil": _valeur(out, "name", "nom")}
+            "signal": int(m.group()) if m else None, "ip": _ip_windows() if ssid else "", "cable": False,
+            "ip_cable": "" if ssid else _ip_windows(), "appareil": _valeur(out, "name", "nom"),
+            "autre": "" if ssid or not _ip_windows() else "réseau"}
 
 
 def _ip_windows():
