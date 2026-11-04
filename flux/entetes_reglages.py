@@ -365,7 +365,7 @@ def entete_horaire(page):
     h0.addWidget(inter)
     v.addLayout(h0)
     p = H.lire(cfg)
-    inter.setChecked(p["actif"])
+    inter.regler(p["actif"])
     ligne = QHBoxLayout()
     ligne.setSpacing(8)
     ligne.addWidget(QLabel("De"))
@@ -432,14 +432,14 @@ def entete_horaire(page):
         if m is None:
             return
         d, f, j = m
-        for wdg in [inter, *pastilles]:
+        for wdg in pastilles:
             wdg.blockSignals(True)
-        inter.setChecked(True)
+        inter.regler(True)
         debut.setTime(QTime.fromString(d, "HH:mm"))
         fin.setTime(QTime.fromString(f, "HH:mm"))
         for k, pa in enumerate(pastilles):
             pa.setChecked(k in list(j))
-        for wdg in [inter, *pastilles]:
+        for wdg in pastilles:
             wdg.blockSignals(False)
         enregistrer()
         modeles.blockSignals(True)
@@ -460,10 +460,7 @@ def entete_horaire(page):
         if not cle.startswith("horaire."):
             return
         x = H.lire(cfg)
-        for wdg, val in ((inter, x["actif"]),):
-            wdg.blockSignals(True)
-            wdg.setChecked(val)
-            wdg.blockSignals(False)
+        inter.regler(x["actif"])
         for t, val in ((debut, x["debut"]), (fin, x["fin"])):
             t.blockSignals(True)
             t.setTime(QTime.fromString(val, "HH:mm"))

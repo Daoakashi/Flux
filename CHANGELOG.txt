@@ -1,3 +1,13 @@
+Beta Version 0.10.2 alpha
++ Ajouts
+  - Bouton « Réseau » (en bas de la barre de gauche) et indicateur WiFi dans la barre d'état : choisir un
+    réseau WiFi, taper son mot de passe, rejoindre un réseau caché, se déconnecter, oublier un réseau,
+    activer ou couper le WiFi, et vérifier qu'Internet répond, sans quitter Flux. Indispensable en mode
+    kiosque, où la barre des tâches de Linux n'est pas accessible. En kiosque, changer de réseau demande
+    le code administrateur. Linux : NetworkManager (Linux Mint, Ubuntu) ; Windows : WiFi du système.
+  - Mode kiosque : le compte du kiosque a le droit de gérer le WiFi depuis Flux (relancez une fois
+    « sudo bash kiosque.sh activer » pour l'ajouter à un kiosque déjà installé).
+
 Beta Version 0.10.1 alpha
 + Ajouts
   - Plage horaire de la détection (Réglages › Détection, en haut) : par exemple de 6 h à 22 h, la nuit

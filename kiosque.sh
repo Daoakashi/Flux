@@ -33,6 +33,8 @@ GDM_CONF=/etc/gdm3/custom.conf
 XORG_CONF=/etc/X11/xorg.conf.d/90-flux-kiosque.conf
 CRON=/etc/cron.d/flux-kiosque
 CODE=/etc/flux-kiosque.json
+POLKIT_RULES=/etc/polkit-1/rules.d/49-flux-kiosque-reseau.rules
+POLKIT_PKLA=/etc/polkit-1/localauthority/50-local.d/49-flux-kiosque-reseau.pkla
 CIBLES_VEILLE="sleep.target suspend.target hibernate.target hybrid-sleep.target"
 
 if [ -t 1 ]; then V=$'\e[32m'; R=$'\e[31m'; J=$'\e[33m'; B=$'\e[1m'; N=$'\e[0m'; else V=; R=; J=; B=; N=; fi
@@ -248,6 +250,28 @@ PY
     fi
     systemctl mask $CIBLES_VEILLE >/dev/null 2>&1 && ok "Mise en veille du PC desactivee."
 
+    # 6 bis. Reseau : le compte du kiosque peut choisir un WiFi depuis Flux (pas de barre des taches ni de
+    #        fenetre de mot de passe administrateur dans le kiosque). Limite a NetworkManager.
+    mkdir -p "$(dirname "$POLKIT_RULES")" "$(dirname "$POLKIT_PKLA")"
+    cat > "$POLKIT_RULES" <<RULES
+// Flux (mode kiosque) : le compte $UTIL gere le WiFi depuis Flux, sans mot de passe administrateur.
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.user === "$UTIL") {
+        return polkit.Result.YES;
+    }
+});
+RULES
+    cat > "$POLKIT_PKLA" <<PKLA
+[Flux kiosque : reseau]
+Identity=unix-user:$UTIL
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+    chmod 644 "$POLKIT_RULES" "$POLKIT_PKLA"
+    ok "Reseau : $UTIL peut choisir le WiFi depuis Flux (bouton Reseau, en bas a gauche)."
+
     # 7. Options
     if [ -n "$HEURE" ]; then
         printf '# Cree par kiosque.sh (Flux) : redemarrage quotidien\n0 %s * * * root /sbin/shutdown -r now "Redemarrage quotidien du kiosque Flux"\n' "$HEURE" > "$CRON"
@@ -286,6 +310,7 @@ desactiver() {
     besoin_root desactiver
     local UTIL=""; [ -f "$ETC/utilisateur" ] && UTIL="$(cat "$ETC/utilisateur")"
     rm -f "$LIGHTDM_CONF" "$XORG_CONF" "$CRON" "$SESSION_DESKTOP" "$SESSION_BIN"
+    rm -f "$POLKIT_RULES" "$POLKIT_PKLA"
     if [ -f "$ETC/lightdm.conf.avant-kiosque" ]; then
         cp -a "$ETC/lightdm.conf.avant-kiosque" /etc/lightdm/lightdm.conf
     fi

@@ -458,6 +458,14 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.cubicTo(15.4, 15.1, 12, 15.8, 9, 15.6)
         pp.cubicTo(10.6, 17.2, 9.8, 19.6, 7.2, 20.8)
         pp.addEllipse(QPointF(9, 15.6), 1.5, 1.5)
+    elif nom == "wifi":  # réseau WiFi
+        pp.moveTo(2.5, 9)
+        pp.cubicTo(7.8, 4.3, 16.2, 4.3, 21.5, 9)
+        pp.moveTo(5.5, 12.3)
+        pp.cubicTo(9.2, 9.2, 14.8, 9.2, 18.5, 12.3)
+        pp.moveTo(8.6, 15.6)
+        pp.cubicTo(10.6, 14, 13.4, 14, 15.4, 15.6)
+        pp.addEllipse(QPointF(12, 19), 1.1, 1.1)
     elif nom == "bouclier":  # pare-feu
         pp.moveTo(12, 3)
         pp.lineTo(19.5, 6)

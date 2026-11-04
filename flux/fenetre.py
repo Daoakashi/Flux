@@ -25,7 +25,7 @@ from .page_personnes import PagePersonnes
 from .page_reglages import PageReglages
 from .notifications import Notifieur
 from .sources import PREFIXE_MAIL_OK, Mailer, slug
-from .taches import Tache
+from .taches import Tache, en_arriere_plan
 from .theme import C, T, couleur, dessiner_logo, icone_application, police, regler_logo
 from .widgets import Bouton, BoutonNav, Logo, Toasts, etiquette
 from .feedback import CREDITS_IA
@@ -168,21 +168,21 @@ def charger(signal_etape, cfg):
 class DialogueKiosque(QDialog):
     """Code administrateur pour quitter le mode kiosque. Trois erreurs : la fenêtre se ferme."""
 
-    def __init__(self, fen):
+    def __init__(self, fen, titre="Quitter le mode kiosque", texte=None, bouton="Quitter le kiosque"):
         from PySide6.QtWidgets import QLineEdit
         super().__init__(fen)
         self.fen = fen
-        self.setWindowTitle("Quitter le mode kiosque")
+        self.setWindowTitle(titre)
         self.setMinimumWidth(400)
         self.essais = 0
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 20, 22, 18)
         v.setSpacing(10)
-        t = QLabel("Quitter le mode kiosque")
+        t = QLabel(titre)
         t.setObjectName("titre")
         v.addWidget(t)
-        v.addWidget(etiquette("Flux va se fermer et le PC reviendra à l'écran de connexion. Tapez le code "
-                              "administrateur choisi lors de l'activation du kiosque."))
+        v.addWidget(etiquette(texte or "Flux va se fermer et le PC reviendra à l'écran de connexion. Tapez le code "
+                                       "administrateur choisi lors de l'activation du kiosque."))
         self.code = QLineEdit()
         self.code.setEchoMode(QLineEdit.EchoMode.Password)
         self.code.setPlaceholderText("Code administrateur")
@@ -195,7 +195,7 @@ class DialogueKiosque(QDialog):
         b0 = Bouton("Annuler")
         b0.clicked.connect(self.reject)
         b0.setAutoDefault(False)
-        b1 = Bouton("Quitter le kiosque", "primaire")
+        b1 = Bouton(bouton, "primaire")
         b1.setDefault(True)  # Entrée valide (une seule fois)
         b1.clicked.connect(self._ok)
         h.addWidget(b0)
@@ -488,6 +488,11 @@ class FenetrePrincipale(QMainWindow):
         from . import clips
         self._tache_purge = Tache(clips.purger, os.path.join(cfg.dossier_sortie(), "videos"),
                                   cfg.get("clips.conservation")).lancer()
+        # Indicateur réseau (WiFi / câble) de la barre d'état
+        self._timer_reseau = QTimer(self)
+        self._timer_reseau.timeout.connect(self.maj_reseau)
+        self._timer_reseau.start(30 * 1000)
+        QTimer.singleShot(2000, self.maj_reseau)
         # Limite d'espace disque : les plus anciens enregistrements partent en premier
         self._timer_disque = QTimer(self)
         self._timer_disque.timeout.connect(self.menage_disque)
@@ -546,11 +551,16 @@ class FenetrePrincipale(QMainWindow):
         b_feedback.setToolTip("Envoyer une idée, un problème ou une question à l'éditeur de Flux")
         b_feedback.clicked.connect(self.feedback)
         bv.addWidget(b_feedback)
+        b_reseau = BoutonNav("Réseau", "wifi")
+        b_reseau.setCheckable(False)
+        b_reseau.setToolTip("Se connecter à un réseau WiFi (utile en mode kiosque, sans barre des tâches)")
+        b_reseau.clicked.connect(self.ouvrir_reseau)
+        bv.addWidget(b_reseau)
         b_info = BoutonNav("À propos", "info")
         b_info.setCheckable(False)
         b_info.clicked.connect(lambda: APropos(self).exec())
         bv.addWidget(b_info)
-        self.boutons_bas = [self.b_theme, b_feedback, b_info]
+        self.boutons_bas = [self.b_theme, b_feedback, b_reseau, b_info]
         h.addWidget(self.barre)
 
         zone = QWidget()
@@ -590,6 +600,11 @@ class FenetrePrincipale(QMainWindow):
         self.info_maj = None
         for w in (self.st_appareil, self.st_niveau, self.st_cameras, self.st_base):
             sb.addWidget(w)
+        self.st_reseau = QLabel("")
+        self.st_reseau.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.st_reseau.setToolTip("Réseau : cliquez pour choisir un WiFi")
+        self.st_reseau.mousePressEvent = lambda _e: self.ouvrir_reseau()
+        sb.addPermanentWidget(self.st_reseau)
         sb.addPermanentWidget(self.st_maj)
         sb.addPermanentWidget(self.st_notif)
         sb.addPermanentWidget(self.st_mail)
@@ -638,6 +653,36 @@ class FenetrePrincipale(QMainWindow):
         else:
             self.toast("Mode kiosque : les autres programmes (navigateur, explorateur de fichiers) ne s'ouvrent "
                        "pas. Quittez le kiosque (Ctrl+Alt+Maj+Q) pour y accéder.", "info")
+
+    def ouvrir_reseau(self):
+        from .dialogue_reseau import DialogueReseau
+        DialogueReseau(self).exec()
+        self.maj_reseau()
+
+    def maj_reseau(self):
+        """Indicateur réseau de la barre d'état (lu dans un fil à part, toutes les 30 secondes)."""
+        from . import reseau_wifi as rw
+        if not rw.disponible()[0] or getattr(self, "_lecture_reseau", False):
+            return
+        self._lecture_reseau = True
+
+        def ok(e):
+            self._lecture_reseau = False
+            if e.get("ssid"):
+                sig = e.get("signal")
+                self.st_reseau.setText(f"WiFi {e['ssid']}" + (f" {rw.barres(sig)}" if sig is not None else ""))
+                self.st_reseau.setStyleSheet("")
+            elif e.get("cable"):
+                self.st_reseau.setText("Réseau : câble")
+                self.st_reseau.setStyleSheet("")
+            else:
+                self.st_reseau.setText("Pas de réseau")
+                self.st_reseau.setStyleSheet(f"color: {C['danger']}; font-weight: 600;")
+
+        def ko(_e):
+            self._lecture_reseau = False
+
+        en_arriere_plan(rw.etat, ok, ko)
 
     def feedback(self):
         from .feedback import DialogueFeedback

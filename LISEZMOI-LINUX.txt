@@ -96,6 +96,8 @@ après une mise à jour, et l'écran ne se met jamais en veille.
       --verrouiller       bloque aussi Ctrl+Alt+F1…F6 (terminaux)
   Quitter le kiosque : Ctrl+Alt+Maj+Q, puis le code administrateur. Le PC revient à l'écran de
     connexion : choisissez votre session habituelle (Cinnamon) pour retrouver le bureau.
+  Réseau WiFi dans le kiosque : bouton « Réseau » en bas de la barre de gauche de Flux (code
+  administrateur demandé pour changer de réseau).
   Désactiver pour de bon :  sudo bash kiosque.sh desactiver
   Changer le code :         sudo bash kiosque.sh code
   Vérifier :                bash kiosque.sh etat
