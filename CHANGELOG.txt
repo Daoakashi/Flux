@@ -1,3 +1,10 @@
+Beta Version 0.10.5 alpha
+* Corrections
+  - IVS : une flèche tracée en hauteur (au niveau d'un comptoir, d'une porte, d'un rayon) ne se
+    déclenchait jamais, car seuls les pieds de la personne comptaient. Maintenant, tout le cadre de la
+    personne compte : il suffit qu'elle touche la flèche en allant du côté de A jusqu'au bout B. Le sens
+    inverse ne déclenche toujours rien.
+
 Beta Version 0.10.4 alpha
 + Ajouts
   - IVS (onglet de chaque caméra, entre les options et les zones) : tracez une ou plusieurs flèches sur

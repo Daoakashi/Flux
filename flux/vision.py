@@ -1278,9 +1278,10 @@ class Pipeline:
         return sortie
 
     def _verifier_fleches(self, p, frame, w, h, enregistrer):
-        """IVS : la personne a-t-elle suivi une flèche de A vers B ? (repère : ses pieds, bas du cadre)"""
-        x, y = (p.box[0] + p.box[2]) / 2 / max(w, 1), p.box[3] / max(h, 1)
-        for f in self.suivi_ivs.mettre_a_jour(p.id, x, y, self._fl, w, h):
+        """IVS : la personne a-t-elle suivi une flèche de A vers B ? (tout son cadre compte, pas seulement les pieds)"""
+        W, H = max(w, 1), max(h, 1)
+        cadre = (p.box[0] / W, p.box[1] / H, p.box[2] / W, p.box[3] / H)
+        for f in self.suivi_ivs.mettre_a_jour(p.id, cadre, self._fl, w, h):
             detail = f"Franchissement {f['nom_a']} → {f['nom_b']} ({f['nom']})"
             if f["alarme"]:
                 self.emettre(f"IVS : {self._nom_piste(p)} · {detail}", "alerte", image=frame, type_action="ivs",

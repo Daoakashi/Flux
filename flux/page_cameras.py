@@ -444,9 +444,10 @@ class PageFlux(QWidget):
         col.addSpacing(4)
         col.addWidget(separateur())
         col.addWidget(etiquette("IVS · FRANCHISSEMENT", "section"))
-        col.addWidget(etiquette("Tracez une flèche sur l'image, du point A vers le point B : une personne qui suit ce "
-                                "chemin est signalée (le sens inverse ne déclenche rien). Ex. A « Rayon » → B "
-                                "« Sortie de secours »."))
+        col.addWidget(etiquette("Tracez une flèche sur l'image, du point A vers le point B : une personne dont le "
+                                "cadre touche la flèche et qui va du côté de A jusqu'au bout B est signalée (le sens "
+                                "inverse ne déclenche rien). Ex. A « Rayon » → B « Sortie de secours ». La détection "
+                                "doit être active."))
         self.b_tracer = Bouton("Tracer des flèches", "discret", "fleche")
         self.b_tracer.setCheckable(True)
         self.b_tracer.setToolTip("Glissez sur l'image de A vers B. Tirez un bout pour le déplacer, le trait pour "

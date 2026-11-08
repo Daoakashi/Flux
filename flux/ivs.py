@@ -1,7 +1,7 @@
 """IVS (analyse vidéo intelligente) : flèches de franchissement.
 
-Une flèche va d'un point A à un point B (coordonnées 0-1 de l'image). Une personne qui suit la flèche dans ce
-sens (elle passe près de A puis atteint B, dans le couloir de la flèche) déclenche un « franchissement » :
+Une flèche va d'un point A à un point B (coordonnées 0-1 de l'image). Une personne dont le cadre touche le
+couloir de la flèche et qui la suit dans ce sens (du côté de A jusqu'au bout B) déclenche un « franchissement » :
 inscrit au journal, et, si l'alarme de la flèche est cochée, une alerte avec un son sur le PC.
 Le sens inverse (B vers A) ne déclenche rien : c'est le passage non désiré qu'on surveille
 (ex. A « Rayon » → B « Sortie de secours »).
@@ -10,7 +10,7 @@ import math
 
 MAX_FLECHES = 12
 LARGEUR_DEFAUT = 0.12   # demi-largeur du couloir, en part de la largeur de l'image
-DEBUT, FIN = 0.25, 0.75  # « près de A » : premier quart de la flèche ; « arrivé à B » : dernier quart
+DEBUT, FIN = 0.33, 0.67  # « côté A » : premier tiers de la flèche ; « arrivé à B » : dernier tiers
 
 
 def _point(v):
@@ -75,22 +75,40 @@ def position(f, x, y, w=1.0, h=1.0):
     return t, d / max(w, 1e-9)
 
 
+def distance_cadre(f, box, w=1.0, h=1.0):
+    """Distance entre le trait de la flèche (droite AB) et le cadre d'une personne, en part de la largeur de
+    l'image : 0 si la droite traverse le cadre. On regarde tout le corps, pas seulement les pieds : une flèche
+    tracée à hauteur de table ou de porte fonctionne aussi."""
+    x1, y1, x2, y2 = box
+    ds = []
+    for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
+        ax, ay = f["a"][0] * w, f["a"][1] * h
+        bx, by = f["b"][0] * w, f["b"][1] * h
+        dx, dy = bx - ax, by - ay
+        lg = math.hypot(dx, dy) or 1e-9
+        ds.append(((x * w - ax) * dy - (y * h - ay) * dx) / lg)
+    if min(ds) <= 0 <= max(ds):
+        return 0.0
+    return min(abs(d) for d in ds) / max(w, 1e-9)
+
+
 class SuiviFleches:
     """État de chaque personne suivie vis-à-vis de chaque flèche (dans le fil d'analyse d'une caméra)."""
 
     def __init__(self):
         self.etats = {}  # (piste, nom de flèche) -> "A" (vue près de A) ou "fait" (franchissement signalé)
 
-    def mettre_a_jour(self, piste_id, x, y, fleches, w, h):
-        """x, y : pieds de la personne (0-1). Renvoie la liste des flèches franchies à cet instant."""
+    def mettre_a_jour(self, piste_id, box, fleches, w, h):
+        """box : cadre de la personne (x1, y1, x2, y2 en 0-1). Renvoie les flèches franchies à cet instant."""
         franchies = []
+        x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
         for f in fleches:
             cle = (piste_id, f["nom"])
             etat = self.etats.get(cle)
             if etat == "fait":
                 continue
-            t, d = position(f, x, y, w, h)
-            if d > f["largeur"]:
+            t, _ = position(f, x, y, w, h)  # avancement le long de la flèche : centre du cadre
+            if distance_cadre(f, box, w, h) > f["largeur"]:
                 continue  # hors du couloir : rien ne change (l'analyse peut sauter quelques images)
             if t <= DEBUT:
                 self.etats[cle] = "A"
