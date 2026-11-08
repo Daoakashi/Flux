@@ -27,7 +27,7 @@ RESEAU_LOCAL = {"fluxlite.nom_local", "developpeur.nom_reseau", "developpeur.dom
                 "developpeur.ports_standard"}
 from .theme import C, T, couleur
 from .taches import en_arriere_plan
-from .widgets import Bouton, Interrupteur, etiquette
+from .widgets import Bouton, Interrupteur, Rangee, etiquette
 
 TEXTE_PILOTAGE = ("Depuis FluxLite, ce compte pourra activer ou désactiver la détection (de ses caméras ou de "
                   "tout le PC) et les notifications de Flux : mails, WhatsApp, Telegram, SMS… Réservé aux "
@@ -120,6 +120,10 @@ class Pilote(ms.PiloteVide):
             except queue.Empty:
                 return
             try:
+                if action == "executer":  # supervision centrale : lecture de l'état dans le fil de l'interface
+                    resultat["valeur"] = prm["f"]()
+                    fini.set()
+                    continue
                 if action == "regler":
                     self._regler(**{k: prm[k] for k in ("cle", "valeur", "camera", "auteur")})
                 resultat["valeur"] = self.etat(prm.get("cameras") or [])
@@ -591,7 +595,7 @@ class PageFluxLite(QWidget):
         gv.addWidget(etiquette("Créée une seule fois sur ce PC et conservée par les mises à jour. Le téléphone la "
                                "vérifie à chaque connexion : un autre ordinateur ne peut pas se faire passer pour "
                                "celui-ci."))
-        hb = QHBoxLayout()
+        hb = Rangee()
         b = Bouton("Copier la clé")
         b.clicked.connect(lambda: self._copier(self.serveur.identite.cle_affichee if self.serveur else ""))
         hb.addWidget(b)
@@ -600,8 +604,9 @@ class PageFluxLite(QWidget):
         hb.addWidget(b)
         hb.addStretch(1)
         gv.addLayout(hb)
-        b = Bouton("Copier le lien pour Flux Remote", "fantome", "lien")
-        b.setToolTip("Adresse, port et clé en un seul lien : collez-le dans Flux Remote sur un autre ordinateur.")
+        b = Bouton("Lien pour Flux Remote", "fantome", "lien")
+        b.setToolTip("Copie l'adresse, le port et la clé en un seul lien : collez-le dans Flux Remote sur un autre "
+                     "ordinateur.")
         b.clicked.connect(lambda: self.serveur and self._copier(
             self.serveur.lien(ms.adresses_locales(), self.cfg.get("fluxlite.port"))))
         gv.addWidget(b, 0, Qt.AlignmentFlag.AlignLeft)
@@ -625,7 +630,7 @@ class PageFluxLite(QWidget):
         self.lbl_web = etiquette("", "aide")
         self.lbl_web.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         gv.addWidget(self.lbl_web)
-        hw = QHBoxLayout()
+        hw = Rangee()
         self.b_web_ouvrir = Bouton("Ouvrir", "fantome", "lien")
         self.b_web_ouvrir.setToolTip("Ouvre l'interface web de Flux dans le navigateur de ce PC.")
         self.b_web_ouvrir.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._adresse_web(local=True))))
@@ -672,8 +677,9 @@ class PageFluxLite(QWidget):
         defil.setWidgetResizable(True)
         defil.setFrameShape(QScrollArea.Shape.NoFrame)
         defil.setWidget(gauche)
-        defil.setMinimumWidth(360)
-        defil.setMaximumWidth(460)
+        defil.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        defil.setMinimumWidth(400)
+        defil.setMaximumWidth(520)
         split.addWidget(defil)
 
         # --- colonne comptes / entreprises ------------------------------------------

@@ -78,6 +78,7 @@ class PagePersonnes(QWidget):
         haut.addWidget(t)
         self.lbl_stats = QLabel("")
         self.lbl_stats.setObjectName("soustitre")
+        self.lbl_stats.setWordWrap(True)
         haut.addSpacing(12)
         haut.addWidget(self.lbl_stats)
         haut.addStretch(1)
@@ -120,6 +121,7 @@ class PagePersonnes(QWidget):
         vl.addStretch(1)
         lv = QLabel("Sélectionnez une personne")
         lv.setObjectName("grand")
+        lv.setWordWrap(True)
         lv.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vl.addWidget(lv)
         lv2 = etiquette("Les visages vus par les caméras apparaissent ici automatiquement (« Inconnu 1 », « Inconnu 2 »…). "

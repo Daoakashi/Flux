@@ -262,6 +262,7 @@ class PageJournal(QWidget):
         while self.flow_cats.count():
             it = self.flow_cats.takeAt(0)
             if it.widget():
+                it.widget().hide()  # sinon l'ancienne pastille reste affichée par-dessus jusqu'à sa destruction
                 it.widget().deleteLater()
         h = self.flow_cats
         self.pastilles_cats = {}

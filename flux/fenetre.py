@@ -441,6 +441,10 @@ class FenetrePrincipale(QMainWindow):
         self.kiosque = kiosque.actif()
         self._sortie_kiosque = False
         self.info_appareil = info or {}
+        from . import affichage
+        affichage.installer(QApplication.instance())
+        from .alarme import Alarme
+        self.alarme = Alarme(cfg)
         from .clavier import GestionClavier
         self.clavier = GestionClavier(QApplication.instance(), cfg, self)
         self.setWindowIcon(icone_application())
@@ -579,6 +583,9 @@ class FenetrePrincipale(QMainWindow):
         self.page_personnes = PagePersonnes(self)
         self.page_journal = PageJournal(self)
         self.page_mobile = PageFluxLite(self)
+        from .central import AgentCentral
+        self.central = AgentCentral(self)
+        self.central.demarrer()  # attend sans rien envoyer tant que ce PC n'est pas relié à une console
         from .page_frequentation import PageFrequentation
         self.page_frequentation = PageFrequentation(self)
         self.page_reglages = PageReglages(self)
@@ -1183,13 +1190,20 @@ class FenetrePrincipale(QMainWindow):
                 break
             self._journaliser(e)
             self.page_mobile.evenement(e)
+            self.central.evenement(e)
             if e.get("source") == "FluxLite" and "à valider" in e.get("texte", ""):
                 self.maj_badge_fluxlite()
             try:
                 self._notifier(e)
             except Exception as ex:  # noqa: BLE001
                 self.log_systeme(f"Notification : {ex}", "erreur")
+            if e.get("ivs"):  # la flèche franchie clignote sur l'image de la caméra
+                page_ivs = self.page_cameras.page_par_nom(e.get("source"))
+                if page_ivs is not None:
+                    page_ivs.video.ivs.signaler(e["ivs"])
             if e["niveau"] == "alerte":
+                if e.get("alarme") or self.cfg.get("ivs.son_alertes"):
+                    self.alarme.jouer()
                 self.toast(f"{e['source']} · {e['texte']}", "alerte")
                 self._alerte_mail(e["source"], e["texte"], e.get("jpeg"), e.get("prioritaire", False))
                 if self.pile.currentWidget() is not self.page_journal:
@@ -1236,6 +1250,7 @@ class FenetrePrincipale(QMainWindow):
         else:
             self.page_cameras.sauver()  # avant l'arrêt, pour mémoriser les caméras actives
         self.page_lecteur.arreter()
+        self.central.arreter()
         self.page_mobile.fermer()
         self.page_cameras.tout_arreter()
         self.cfg.sauver()

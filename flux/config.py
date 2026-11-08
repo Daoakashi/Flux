@@ -101,9 +101,9 @@ CATEGORIES = [
     ("apparence", "Apparence"), ("detection", "Détection"), ("basse_lumiere", "Basse lumière"),
     ("visages", "Visages et reconnaissance"), ("confidentialite", "Confidentialité (flou des têtes)"),
     ("plaques", "Plaques"), ("frequentation", "Fréquentation (heatmap)"), ("base", "Base de données"),
-    ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
+    ("ivs", "IVS et alarme sonore"), ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
     ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("stockage", "Espace disque"),
-    ("lecteur", "Lecteur vidéo"),
+    ("lecteur", "Lecteur vidéo"), ("central", "Supervision centrale"),
     ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
 ]
 CATEGORIES_CACHEES = {"developpeur"}  # visibles seulement en mode développeur
@@ -445,6 +445,20 @@ SCHEMA = [
       " jours"),
 
     # --- Espace disque ------------------------------------------------------------------------
+    R("ivs.son", "ivs", "Son de l'alarme", "choix", "base",
+      "Joué sur ce PC quand une personne franchit une flèche IVS dont l'alarme est cochée (onglet de la caméra).",
+      [("base", "Base : 5 bips (0,4 s)"), ("sirene", "Sirène montante"), ("deux_tons", "Deux tons (pin-pon)"),
+       ("rapide", "Bips rapides"), ("carillon", "Carillon (discret)"), ("grave", "Klaxon grave"),
+       ("fichier", "Fichier personnel (.wav)")]),
+    R("ivs.fichier_son", "ivs", "Fichier personnel", "texte", "",
+      "Chemin d'un fichier .wav (choisissez « Fichier personnel » ci-dessus)."),
+    R("ivs.volume", "ivs", "Volume de l'alarme", "int", 80, "", None, 0, 100, 5, " %"),
+    R("ivs.repetitions", "ivs", "Répéter le son", "int", 1, "Nombre de fois que le son est joué pour un franchissement.",
+      None, 1, 10, 1, " fois"),
+    R("ivs.son_alertes", "ivs", "Sonner aussi pour les autres alertes", "bool", False,
+      "Liste noire, personnes surveillées et autres alertes jouent le même son."),
+    R("central.actif", "central", "Envoyer à la console", "bool", True,
+      "Désactivé : ce PC reste relié mais n'envoie plus rien (et ne reçoit plus de commandes)."),
     R("stockage.limite", "stockage", "Espace maximum pour Flux", "float", 20,
       "Photos, vidéos, journal et bases. Au-delà, les plus anciens enregistrements sont supprimés en premier ; "
       "les plus récents sont toujours gardés. 0 = sans limite.", None, 0, 2000, 1, " Go"),

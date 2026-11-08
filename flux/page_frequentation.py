@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QGridLayout, QHBo
 
 from . import frequentation as F
 from .theme import C, couleur, police
-from .widgets import Bouton, Interrupteur, Pastille, etiquette
+from .widgets import Bouton, Interrupteur, Pastille, Rangee, etiquette
 
 PERIODES = [("jour", "Aujourd'hui"), ("hier", "Hier"), ("7j", "7 jours"), ("30j", "30 jours"), ("tout", "Tout")]
 
@@ -253,8 +253,10 @@ class Tuile(QFrame):
         v.setSpacing(2)
         t = QLabel(titre.upper())
         t.setObjectName("section")
+        t.setWordWrap(True)
         self.valeur = QLabel("—")
-        self.valeur.setStyleSheet(f"font-size: 22px; font-weight: 650;")
+        self.valeur.setWordWrap(True)
+        self.valeur.setStyleSheet("font-size: 22px; font-weight: 650;")
         self.detail = etiquette("", "aide")
         v.addWidget(t)
         v.addWidget(self.valeur)
@@ -276,7 +278,7 @@ class PageFrequentation(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(10)
 
-        haut = QHBoxLayout()
+        haut = Rangee(espacement=10)
         t = QLabel("Fréquentation")
         t.setObjectName("titre_page")
         haut.addWidget(t)
@@ -293,8 +295,7 @@ class PageFrequentation(QWidget):
         haut.addWidget(b_img)
         haut.addWidget(b_csv)
         v.addLayout(haut)
-        ligne_p = QHBoxLayout()
-        ligne_p.setSpacing(8)
+        ligne_p = Rangee()
         self.pastilles = {}
         for cle, lib in PERIODES:
             b = Pastille(lib, "accent")
@@ -332,7 +333,7 @@ class PageFrequentation(QWidget):
         defil = QScrollArea()
         defil.setWidgetResizable(True)
         defil.setMinimumWidth(300)
-        defil.setMaximumWidth(420)
+        defil.setMaximumWidth(460)
         defil.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         droite = QWidget()
         dv = QVBoxLayout(droite)

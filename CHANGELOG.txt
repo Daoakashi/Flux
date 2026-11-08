@@ -1,3 +1,30 @@
+Beta Version 0.10.4 alpha
++ Ajouts
+  - IVS (onglet de chaque caméra, entre les options et les zones) : tracez une ou plusieurs flèches sur
+    l'image, du point A vers le point B. Une personne qui suit ce chemin est signalée ; le sens inverse
+    ne déclenche rien (ex. A « Rayon » → B « Sortie de secours »). A, B et chaque flèche se renomment ;
+    une case active l'alarme : alerte (notifications, mail, FluxLite) et son sur le PC, la flèche
+    clignote en rouge sur l'image. Sans alarme, le passage est simplement noté au journal (nouvelle
+    catégorie « IVS (franchissements) »). Clic droit sur une flèche : renommer, inverser, supprimer.
+  - Sons d'alarme (Réglages › IVS et alarme sonore) : son de base (5 bips, un toutes les 0,4 s),
+    sirène, deux tons, bips rapides, carillon, klaxon grave ou votre propre fichier .wav ; volume,
+    répétitions, bouton « Écouter », et option pour sonner aussi pour les autres alertes.
+  - Supervision centrale (Réglages › Supervision centrale) : relie ce PC à la console Flux Central avec
+    son adresse et un code d'inscription. La console voit l'état de Flux, des caméras et du disque,
+    reçoit le type et l'heure des alertes (sans photo ni donnée biométrique), vérifie la licence et
+    peut piloter la détection. Échanges chiffrés et signés ; « Délier ce PC » à tout moment.
+* Corrections d'affichage (surtout Linux, polices larges, petits écrans, texte agrandi)
+  - Réglages : le contenu pouvait glisser vers la droite (molette, pavé tactile) et cacher les noms des
+    réglages. La page ne défile plus jamais horizontalement, dans aucune page de Flux.
+  - Réglages : quand la place manque, le réglage passe sous son nom au lieu de pousser le texte hors de
+    l'écran ; les longs noms et titres passent à la ligne ; les listes déroulantes ne s'élargissent plus
+    au libellé le plus long (la liste ouverte reste complète).
+  - Rangées de boutons (FluxLite, Notifications, Développeur, Espace disque, Mises à jour, plage
+    horaire, niveaux de détection, barre du haut des Réglages) : passent à la ligne au lieu d'être coupées.
+  - FluxLite : la colonne du serveur n'était plus lisible à droite (boutons et textes coupés).
+  - Journal : des pastilles de catégories pouvaient s'afficher en double, superposées.
+  - Fréquentation et Personnes : titres et compteurs coupés sur les écrans étroits.
+
 Beta Version 0.10.3 alpha
 + Ajouts
   - Clavier visuel (Réglages › Apparence) : écrire à la souris ou au doigt, pour un poste sans clavier,

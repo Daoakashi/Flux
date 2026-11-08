@@ -18,7 +18,7 @@ CATEGORIES_PERSONNE = [("connu", "Connue"), ("inconnu", "Inconnue"), ("surveille
 TYPES_ACTION = {
     "apparition": "Apparition", "identification": "Identification", "zone": "Zone",
     "stationnement": "Stationnement", "depart": "Départ", "alerte": "Alerte", "liste_noire": "Liste noire",
-    "plaque": "Plaque", "video": "Vidéo",
+    "plaque": "Plaque", "video": "Vidéo", "ivs": "IVS (franchissement)",
 }
 
 # Catégories du journal livrées avec Flux. Une action appartient à une catégorie quand elle respecte
@@ -40,8 +40,10 @@ CATEGORIES_JOURNAL_DEFAUT = [
      "regles": {"types": ["plaque"], "personnes": [], "cameras": [], "mots": []}},
     {"nom": "Vidéos", "couleur": "#EC4899", "notifier": False,
      "regles": {"types": ["video"], "personnes": [], "cameras": [], "mots": []}},
+    {"nom": "IVS (franchissements)", "couleur": "#F97316", "notifier": False,
+     "regles": {"types": ["ivs"], "personnes": [], "cameras": [], "mots": []}},
 ]
-NOUVELLES_CATEGORIES = {1: ["Vidéos"]}  # ajoutées automatiquement aux bases existantes
+NOUVELLES_CATEGORIES = {1: ["Vidéos"], 2: ["IVS (franchissements)"]}  # ajoutées automatiquement aux bases existantes
 
 
 def regles_vides():

@@ -752,6 +752,9 @@ class Pipeline:
         self.amelioration_fine = False
         self.moteur = "pytorch"
         self._zs = []
+        self._fl = []
+        from .ivs import SuiviFleches
+        self.suivi_ivs = SuiviFleches()
 
     # --- ressources -------------------------------------------------------------
     def _ressource(self, cle, fabrique, libelle):
@@ -927,6 +930,8 @@ class Pipeline:
         debut = time.time()
         h, w = frame.shape[:2]
         self._zs = zones_options(self.o)
+        from .ivs import fleches_options
+        self._fl = fleches_options(self.o)
         veut_plaques = bool(self.o.get("plaques"))
         sans_animaux = bool(self.cfg.get("detection.ignorer_animaux"))
         classes = [0] + (list(CLASSES_VEHICULES) if veut_plaques else []) + (
@@ -1236,6 +1241,8 @@ class Pipeline:
                         texte = f"Entrée dans « {z['nom']} »" if dedans else f"Sortie de « {z['nom']} »"
                     self._action(p, "zone", texte, frame, enregistrer)
                 p.dans_zones[z["nom"]] = dedans
+            if self._fl:
+                self._verifier_fleches(p, frame, w, h, enregistrer)
             if not p.stationnement_signale and t - p.immobile_depuis >= self.cfg.get("base.stationnement"):
                 p.stationnement_signale = True
                 self._action(p, "stationnement", f"Immobile depuis {t - p.immobile_depuis:.0f} s", frame, enregistrer)
@@ -1254,6 +1261,8 @@ class Pipeline:
                     p.personne is None or p.personne[2] == "inconnu"):
                 self._alerter(p, frame)
 
+        if self._fl:
+            self.suivi_ivs.oublier(q.id for q in self.traqueur.pistes)
         for p in perdues:
             if p.confirmee:
                 duree = p.vue - p.debut
@@ -1267,6 +1276,18 @@ class Pipeline:
             if p.confirmee:
                 sortie.append({"id": p.id, "box": p.box, "personne": p.personne})
         return sortie
+
+    def _verifier_fleches(self, p, frame, w, h, enregistrer):
+        """IVS : la personne a-t-elle suivi une flèche de A vers B ? (repère : ses pieds, bas du cadre)"""
+        x, y = (p.box[0] + p.box[2]) / 2 / max(w, 1), p.box[3] / max(h, 1)
+        for f in self.suivi_ivs.mettre_a_jour(p.id, x, y, self._fl, w, h):
+            detail = f"Franchissement {f['nom_a']} → {f['nom_b']} ({f['nom']})"
+            if f["alarme"]:
+                self.emettre(f"IVS : {self._nom_piste(p)} · {detail}", "alerte", image=frame, type_action="ivs",
+                             detail=detail, ivs=f["nom"], alarme=True,
+                             personne_id=p.personne[0] if p.personne else None)
+            else:
+                self._action(p, "ivs", detail, frame, enregistrer)
 
     def _resoudre_identite(self, p, frame, enregistrer, t):
         if not p.votes and self.base is not None and p.meilleur_visage is not None and not p.inconnu_cree and (

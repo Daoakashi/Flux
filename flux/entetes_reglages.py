@@ -14,7 +14,7 @@ from .config import PAR_CLE, RACINE, libelle_version
 from .notifications import CANAUX, NOMS_CANAUX, canaux_actifs, telegram_trouver_chat
 from .taches import en_arriere_plan
 from .theme import C
-from .widgets import Bouton, etiquette
+from .widgets import Bouton, Rangee, etiquette
 
 
 def _boite():
@@ -36,7 +36,7 @@ def entete_notifications(page):
     if actifs and not cfg.get("notif.actif"):
         etat += " L'interrupteur général « Envoyer des notifications » est coupé."
     v.addWidget(etiquette(etat))
-    h = QHBoxLayout()
+    h = Rangee()
     h.setSpacing(6)
     h.addWidget(QLabel("Tester :"))
     for canal, nom in CANAUX:
@@ -46,7 +46,7 @@ def entete_notifications(page):
         h.addWidget(b)
     h.addStretch(1)
     v.addLayout(h)
-    h2 = QHBoxLayout()
+    h2 = Rangee()
     b = Bouton("Trouver mon identifiant Telegram", "discret")
     b.clicked.connect(lambda: _trouver_chat(page))
     h2.addWidget(b)
@@ -100,7 +100,7 @@ def entete_maj(page):
     d = depot(cfg)
     v.addWidget(etiquette(f"Version installée : {libelle_version(config.APP_VERSION, config.APP_CANAL)}"
                           + (f" · dépôt : github.com/{d}" if d else " · aucun dépôt GitHub configuré")))
-    h = QHBoxLayout()
+    h = Rangee()
     b = Bouton("Rechercher maintenant", "primaire")
     b.clicked.connect(lambda: fen.verifier_mises_a_jour(manuel=True))
     h.addWidget(b)
@@ -140,10 +140,9 @@ def entete_developpeur(page):
     ch_date.setPlaceholderText("2026-10-07")
     for i, (lib, ch) in enumerate((("Version", ch_version), ("Canal", ch_canal), ("Dépôt GitHub", ch_depot),
                                    ("Date", ch_date))):
-        g.addWidget(QLabel(lib), i // 2, (i % 2) * 2)
-        g.addWidget(ch, i // 2, (i % 2) * 2 + 1)
+        g.addWidget(QLabel(lib), i, 0)
+        g.addWidget(ch, i, 1)
     g.setColumnStretch(1, 1)
-    g.setColumnStretch(3, 1)
     v.addLayout(g)
     apercu = etiquette("")
 
@@ -167,7 +166,7 @@ def entete_developpeur(page):
         fen.appliquer_identite()
         fen.toast("version.json enregistré.", "ok")
 
-    h = QHBoxLayout()
+    h = Rangee()
     b = Bouton("Enregistrer version.json", "primaire")
     b.clicked.connect(enregistrer)
     h.addWidget(b)
@@ -176,7 +175,7 @@ def entete_developpeur(page):
 
     v.addSpacing(6)
     v.addWidget(etiquette("FICHIERS", "section"))
-    h2 = QHBoxLayout()
+    h2 = Rangee()
     for texte, f in (("Modifier config.json…", lambda: DialogueJson(fen).exec()),
                      ("Ouvrir le dossier de Flux", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(RACINE))),
                      ("Préparer une publication (.zip)", lambda: _publication(fen))):
@@ -325,7 +324,7 @@ def entete_clips(page):
                           (cfg.get("mail.actif") and cfg.get("clips.mail")) else
                           "Aucun canal ne reçoit les vidéos : activez Telegram, ntfy ou Discord (Notifications) ou les "
                           "mails. Elles restent enregistrées sur le PC."))
-    h = QHBoxLayout()
+    h = Rangee()
     b = Bouton("Ouvrir le dossier des vidéos", "discret", "dossier")
 
     def ouvrir():
@@ -366,7 +365,7 @@ def entete_horaire(page):
     v.addLayout(h0)
     p = H.lire(cfg)
     inter.regler(p["actif"])
-    ligne = QHBoxLayout()
+    ligne = Rangee()
     ligne.setSpacing(8)
     ligne.addWidget(QLabel("De"))
     debut, fin = QTimeEdit(), QTimeEdit()
@@ -382,7 +381,7 @@ def entete_horaire(page):
     ligne.addWidget(modeles)
     ligne.addStretch(1)
     v.addLayout(ligne)
-    ligne_jours = QHBoxLayout()
+    ligne_jours = Rangee()
     ligne_jours.setSpacing(6)
     pastilles = []
     for i, nom in enumerate(H.JOURS_COURTS):
@@ -516,7 +515,7 @@ def entete_stockage(page):
     def calculer():
         en_arriere_plan(lambda: stockage.etat(cfg.dossier_sortie(), fen.chemins_bases()), afficher)
 
-    h = QHBoxLayout()
+    h = Rangee()
     b = Bouton("Faire le ménage maintenant", "primaire")
     b.clicked.connect(lambda: fen.menage_disque(manuel=True))
     h.addWidget(b)
@@ -531,4 +530,115 @@ def entete_stockage(page):
     except (AttributeError, RuntimeError):
         pass
     calculer()
+    return w
+
+
+# ---------------------------------------------------------------------------
+# IVS et alarme sonore
+# ---------------------------------------------------------------------------
+def entete_ivs(page):
+    fen = page.fen
+    w, v = _boite()
+    v.addWidget(etiquette(
+        "Les flèches IVS se tracent dans l'onglet de chaque caméra (section IVS, entre les options et les zones) : "
+        "une personne qui va de A vers B en suivant la flèche est signalée. Le sens inverse ne déclenche rien. "
+        "Avec l'alarme cochée, c'est une alerte (notifications, mail, FluxLite) et ce PC joue le son choisi ici."))
+    h = Rangee()
+    b = Bouton("Écouter le son", "primaire", "lecture")
+    b.clicked.connect(lambda: fen.alarme.jouer(repetitions=1))
+    h.addWidget(b)
+    bs = Bouton("Arrêter", "discret")
+    bs.clicked.connect(lambda: fen.alarme.arreter())
+    h.addWidget(bs)
+    bf = Bouton("Choisir un fichier .wav…", "discret", "dossier")
+
+    def choisir():
+        from PySide6.QtWidgets import QFileDialog
+        f, _ = QFileDialog.getOpenFileName(page, "Son de l'alarme", "", "Sons WAV (*.wav)")
+        if f:
+            page.cfg.set("ivs.fichier_son", f)
+            page.cfg.set("ivs.son", "fichier")
+    bf.clicked.connect(choisir)
+    h.addWidget(bf)
+    v.addLayout(h)
+    return w
+
+
+# ---------------------------------------------------------------------------
+# Supervision centrale (Flux Central)
+# ---------------------------------------------------------------------------
+def entete_central(page):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QLineEdit
+    from .central import ErreurCentrale
+    from .taches import en_arriere_plan
+    fen = page.fen
+    agent = fen.central
+    w, v = _boite()
+    v.addWidget(etiquette(
+        "Relie ce PC à la console de supervision de votre prestataire (Flux Central) : elle voit si Flux tourne, "
+        "l'état des caméras et du disque, et reçoit le type et l'heure des alertes, sans photo ni donnée "
+        "biométrique. Elle peut aussi piloter la détection comme FluxLite. Chaque échange est chiffré et signé."))
+    etat = etiquette(agent.texte_etat())
+    v.addWidget(etat)
+    zone_relier = QWidget()
+    vr = QVBoxLayout(zone_relier)
+    vr.setContentsMargins(0, 0, 0, 0)
+    adresse = QLineEdit()
+    adresse.setPlaceholderText("https://console.exemple.be")
+    code = QLineEdit()
+    code.setPlaceholderText("Code d'inscription (ex. ABCD-EFGH-JKLM)")
+    code.setMaxLength(20)
+    vr.addWidget(adresse)
+    vr.addWidget(code)
+    h = Rangee()
+    b_relier = Bouton("Relier ce PC", "primaire", "lien")
+    h.addWidget(b_relier)
+    vr.addLayout(h)
+    v.addWidget(zone_relier)
+    h2 = Rangee()
+    b_delier = Bouton("Délier ce PC", "danger")
+    h2.addWidget(b_delier)
+    v.addLayout(h2)
+
+    def maj():
+        try:
+            etat.setText(agent.texte_etat())
+        except RuntimeError:
+            return
+        zone_relier.setVisible(not agent.relie())
+        b_delier.setVisible(agent.relie())
+
+    def relier():
+        b_relier.setEnabled(False)
+        etat.setText("Connexion à la console…")
+
+        def fini(d):
+            b_relier.setEnabled(True)
+            code.clear()
+            page.cfg.set("central.actif", True)
+            fen.toast(f"Relié à la console ({d.get('organisation', '')}).", "ok")
+            fen.log_systeme(f"Supervision centrale : PC relié à « {d.get('organisation', '')} ».", "ok")
+            maj()
+
+        def erreur(e):
+            b_relier.setEnabled(True)
+            etat.setText(f"Impossible de relier ce PC : {e}" if isinstance(e, ErreurCentrale) else f"Erreur : {e}")
+        en_arriere_plan(lambda: agent.relier(adresse.text(), code.text()), fini, erreur)
+
+    def delier():
+        from PySide6.QtWidgets import QMessageBox
+        if QMessageBox.question(page, "Délier ce PC", "Ce PC n'enverra plus rien à la console. Pour le relier à "
+                                "nouveau, il faudra un nouveau code d'inscription. Continuer ?") == QMessageBox.StandardButton.Yes:
+            agent.delier()
+            fen.log_systeme("Supervision centrale : PC délié de la console.", "info")
+            maj()
+
+    b_relier.clicked.connect(relier)
+    code.returnPressed.connect(relier)
+    b_delier.clicked.connect(delier)
+    minuterie = QTimer(w)
+    minuterie.timeout.connect(maj)
+    minuterie.start(2000)
+    maj()
     return w

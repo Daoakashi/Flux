@@ -478,7 +478,8 @@ class Detecteur(threading.Thread):
         self.evenements.put({"heure": datetime.now().strftime("%H:%M:%S"), "source": self.nom, "texte": texte,
                              "niveau": niveau, "chemin": chemin, "jpeg": octets,
                              "personne_id": extra.get("personne_id"), "prioritaire": bool(extra.get("prioritaire")),
-                             "type_action": extra.get("type_action"), "detail": extra.get("detail", texte)})
+                             "type_action": extra.get("type_action"), "detail": extra.get("detail", texte),
+                             "ivs": extra.get("ivs"), "alarme": bool(extra.get("alarme"))})
 
 
     def _enregistrer_base(self, texte, niveau, image, extra):
@@ -487,7 +488,8 @@ class Detecteur(threading.Thread):
                                      extra.get("personne_id"), extra.get("piste"),
                                      image if self.cfg.get("base.miniatures") else None)
         if self.base is not None and niveau == "alerte" and self.cfg.get("base.actions"):
-            self.base.ajouter_action(self.nom, "liste_noire" if extra.get("type_action") == "liste_noire" else "alerte",
+            self.base.ajouter_action(self.nom, extra.get("type_action") if extra.get("type_action") in ("liste_noire", "ivs")
+                                     else "alerte",
                                      texte, extra.get("personne_id"), None,
                                      image if self.cfg.get("base.miniatures") else None)
         if self.base is not None and extra.get("type_action") == "plaque" and self.cfg.get("base.actions"):

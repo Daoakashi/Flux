@@ -3,15 +3,15 @@ de la fenêtre, réinitialisation individuelle, import et export."""
 
 import os
 
-from PySide6.QtCore import QRectF, Qt, QUrl
+from PySide6.QtCore import QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractButton, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QGridLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QScrollArea,
+                               QHBoxLayout, QSizePolicy, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QScrollArea,
                                QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from .config import CATEGORIES, CATEGORIES_CACHEES, DOSSIER_MODELES, NIVEAUX, SCHEMA, nom_modele
 from .theme import C, PALETTES, T, couleur, police
-from .widgets import Bouton, Interrupteur, etiquette, separateur
+from .widgets import Bouton, Interrupteur, Rangee, etiquette, separateur
 
 ACCENTS = ["#2F7BFF", "#1D4ED8", "#0EA5E9", "#3B5BDB", "#06B6D4", "#6366F1"]
 
@@ -82,6 +82,9 @@ class CarteNiveau(QAbstractButton):
         self.setMinimumHeight(118)
         self.setMinimumWidth(200)
 
+    def sizeHint(self):
+        return QSize(270, 118)
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -124,20 +127,53 @@ class LigneReglage(QWidget):
         g.setContentsMargins(4, 8, 4, 8)
         g.setHorizontalSpacing(16)
         g.setVerticalSpacing(2)
-        lib = QLabel(r.libelle)
-        lib.setStyleSheet("font-weight: 600;")
-        g.addWidget(lib, 0, 0)
+        self.g = g
+        self.lib = QLabel(r.libelle)
+        self.lib.setStyleSheet("font-weight: 600;")
+        self.lib.setWordWrap(True)
+        g.addWidget(self.lib, 0, 0)
+        self.desc = None
         if r.description:
-            d = etiquette(r.description)
-            g.addWidget(d, 1, 0)
+            self.desc = etiquette(r.description)
+            g.addWidget(self.desc, 1, 0)
         self.editeur = self._editeur()
-        g.addWidget(self.editeur, 0, 1, 2, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         self.b_reset = Bouton("", "fantome", "retour")
         self.b_reset.setToolTip(f"Revenir à la valeur par défaut ({self._texte_defaut()})")
         self.b_reset.clicked.connect(lambda: self.cfg.set(r.cle, r.defaut))
-        g.addWidget(self.b_reset, 0, 2, 2, 1, Qt.AlignmentFlag.AlignVCenter)
         g.setColumnStretch(0, 1)
+        self.empile = None
+        self._disposer(False)
         self.actualiser()
+
+    def _disposer(self, empile):
+        """Large : libellé à gauche, réglage à droite. Étroit (police large, petite fenêtre) : réglage sous le
+        libellé, au lieu de pousser le texte hors de l'écran."""
+        if empile == self.empile:
+            return
+        self.empile = empile
+        g = self.g
+        for w in (self.editeur, self.b_reset):
+            g.removeWidget(w)
+        if empile:
+            ligne = 2 if self.desc is not None else 1
+            g.addWidget(self.editeur, ligne, 0, 1, 1, Qt.AlignmentFlag.AlignLeft)
+            g.addWidget(self.b_reset, 0, 1, 1, 1, Qt.AlignmentFlag.AlignTop)
+            g.setVerticalSpacing(6)
+        else:
+            g.addWidget(self.editeur, 0, 1, 2, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+            g.addWidget(self.b_reset, 0, 2, 2, 1, Qt.AlignmentFlag.AlignVCenter)
+            g.setVerticalSpacing(2)
+
+    def resizeEvent(self, e):
+        # au moins ~200 px pour le texte à côté du réglage, sinon on empile
+        besoin = self.editeur.sizeHint().width() + self.b_reset.sizeHint().width() + 32 + 200
+        self._disposer(e.size().width() < besoin)
+        super().resizeEvent(e)
+
+    def minimumSizeHint(self):
+        s = super().minimumSizeHint()
+        # empilé, la ligne peut descendre jusqu'à la largeur du réglage lui-même
+        return QSize(min(s.width(), self.editeur.minimumSizeHint().width() + 60), s.height())
 
     def _texte_defaut(self):
         r = self.r
@@ -158,6 +194,9 @@ class LigneReglage(QWidget):
         if r.type == "choix":
             w = QComboBox()
             w.setMinimumWidth(210)
+            # la liste garde la largeur demandée : les libellés longs sont coupés dans le champ, pas dans la fenêtre
+            w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            w.setMinimumContentsLength(18)
             for k, lib in r.choix:
                 w.addItem(lib, k)
             w.currentIndexChanged.connect(lambda: cfg.set(r.cle, w.currentData()))
@@ -261,20 +300,25 @@ class PageReglages(QWidget):
         haut = QHBoxLayout()
         t = QLabel("Réglages")
         t.setObjectName("titre_page")
-        haut.addWidget(t)
+        t.setMinimumWidth(t.sizeHint().width())
+        haut.addWidget(t, 0, Qt.AlignmentFlag.AlignTop)
         haut.addStretch(1)
+        # boutons à droite : passent sur deux lignes si la fenêtre est étroite
+        boutons = QWidget()
+        rb = Rangee(boutons, droite=True)
         self.i_avance = Interrupteur()
         self.i_avance.toggled.connect(self._avance)
-        haut.addWidget(QLabel("Réglages avancés"))
-        haut.addWidget(self.i_avance)
-        haut.addSpacing(12)
+        rb.addWidget(QLabel("Réglages avancés"))
+        rb.addWidget(self.i_avance)
         for texte, f in (("Importer…", self.importer), ("Exporter…", self.exporter)):
             b = Bouton(texte, "discret")
             b.clicked.connect(f)
-            haut.addWidget(b)
+            rb.addWidget(b)
         b = Bouton("Tout réinitialiser", "danger")
         b.clicked.connect(self.tout_reinitialiser)
-        haut.addWidget(b)
+        rb.addWidget(b)
+        boutons.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        haut.addWidget(boutons, 1)
         racine.addLayout(haut)
 
         corps = QHBoxLayout()
@@ -285,7 +329,9 @@ class PageReglages(QWidget):
         self.recherche.textChanged.connect(self._construire_droite)
         gauche.addWidget(self.recherche)
         self.categories = QListWidget()
-        self.categories.setMinimumWidth(170)
+        self.categories.setMinimumWidth(140)
+        self.categories.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.categories.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.categories.setMaximumWidth(240)
         self._remplir_categories()
         self.categories.currentRowChanged.connect(lambda _: self._construire_droite())
@@ -293,6 +339,9 @@ class PageReglages(QWidget):
         corps.addLayout(gauche)
         self.defil = QScrollArea()
         self.defil.setWidgetResizable(True)
+        # jamais de défilement horizontal : le contenu s'adapte à la largeur (sinon, sous Linux, la molette ou le
+        # pavé tactile décalait toute la page vers la droite et les libellés sortaient de l'écran)
+        self.defil.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         corps.addWidget(self.defil, 1)
         racine.addLayout(corps, 1)
         self.categories.setCurrentRow(0)
@@ -308,6 +357,7 @@ class PageReglages(QWidget):
         self.categories.clear()
         for cle, lib in self._categories_visibles():
             it = QListWidgetItem(lib)
+            it.setToolTip(lib)
             it.setData(Qt.ItemDataRole.UserRole, cle)
             self.categories.addItem(it)
         self.categories.blockSignals(False)
@@ -377,7 +427,7 @@ class PageReglages(QWidget):
             v = QVBoxLayout(w)
             v.setContentsMargins(0, 0, 0, 0)
             v.setSpacing(10)
-            h = QHBoxLayout()
+            h = Rangee()
             self.tuiles = []
             for cle, lib in (("sombre", "Sombre"), ("clair", "Clair")):
                 tu = TuileTheme(cle, lib)
@@ -387,7 +437,7 @@ class PageReglages(QWidget):
                 self.tuiles.append(tu)
             h.addStretch(1)
             v.addLayout(h)
-            h2 = QHBoxLayout()
+            h2 = Rangee()
             h2.addWidget(QLabel("Bleu d'accent"))
             h2.addSpacing(8)
             self.pastilles = []
@@ -408,14 +458,13 @@ class PageReglages(QWidget):
             from .entetes_reglages import entete_horaire
             v.addWidget(entete_horaire(self))
             v.addSpacing(6)
-            g = QGridLayout()
-            g.setSpacing(10)
+            g = Rangee(espacement=10)
             self.cartes = []
             for i, (cle, n) in enumerate(NIVEAUX.items()):
                 c = CarteNiveau(cle, n)
                 c.setChecked(self.cfg.get("detection.niveau") == cle)
                 c.clicked.connect(lambda _=False, k=cle: self.cfg.set("detection.niveau", k))
-                g.addWidget(c, i // 2, i % 2)
+                g.addWidget(c)
                 self.cartes.append(c)
             v.addLayout(g)
             info = self.fen.info_appareil
@@ -441,6 +490,12 @@ class PageReglages(QWidget):
         if cat == "clips":
             from .entetes_reglages import entete_clips
             return entete_clips(page=self)
+        if cat == "central":
+            from .entetes_reglages import entete_central
+            return entete_central(self)
+        if cat == "ivs":
+            from .entetes_reglages import entete_ivs
+            return entete_ivs(self)
         if cat == "stockage":
             from .entetes_reglages import entete_stockage
             return entete_stockage(self)

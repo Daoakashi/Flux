@@ -5,11 +5,11 @@ import time
 
 import cv2
 import numpy as np
-from PySide6.QtCore import (QEasingCurve, QParallelAnimationGroup, QPoint, QPointF, QPropertyAnimation, QRectF, QSize,
-                            Qt, QTimer, QVariantAnimation, Signal, Property)
+from PySide6.QtCore import (QEasingCurve, QParallelAnimationGroup, QPoint, QPointF, QPropertyAnimation, QRect, QRectF,
+                            QSize, Qt, QTimer, QVariantAnimation, Signal, Property)
 from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
-                               QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel,
+                               QLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from .theme import C, T, couleur, dessiner_icone, dessiner_logo, melange, police
 from .vision import NOMS_VEHICULES, boite_points, contour_zone, copie_zone, iou, normaliser_zone, point_dans_zone
@@ -357,6 +357,113 @@ def separateur():
     return f
 
 
+class Rangee(QLayout):
+    """Rangée d'éléments qui passe à la ligne quand la place manque (boutons, pastilles, cartes).
+
+    Remplace une QHBoxLayout : avec une police plus large (Linux) ou une fenêtre étroite, les boutons ne sortent
+    plus de l'écran à droite. addStretch / addSpacing sont acceptés (sans effet) pour garder le même code."""
+
+    def __init__(self, parent=None, espacement=8, droite=False):
+        super().__init__(parent)
+        self._items = []
+        self._esp = espacement
+        self._droite = droite  # lignes calées à droite (barres de boutons en haut des pages)
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def addStretch(self, *_a):
+        pass
+
+    def addSpacing(self, *_a):
+        pass
+
+    def setSpacing(self, esp):
+        self._esp = esp
+        self.invalidate()
+
+    def spacing(self):
+        return self._esp
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, largeur):
+        return self._placer(QRect(0, 0, largeur, 0), False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._placer(rect, True)
+
+    def sizeHint(self):
+        # largeur « idéale » : tout sur une ligne ; la hauteur suit heightForWidth
+        w = h = 0
+        for it in self._visibles():
+            sh = it.sizeHint()
+            w += sh.width() + (self._esp if w else 0)
+            h = max(h, sh.height())
+        m = self.contentsMargins()
+        return QSize(w + m.left() + m.right(), h + m.top() + m.bottom())
+
+    def minimumSize(self):
+        # au plus étroit : l'élément le plus large, seul sur sa ligne
+        s = QSize()
+        for it in self._visibles():
+            s = s.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return s + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _visibles(self):
+        return [it for it in self._items if not (it.widget() is not None and it.widget().isHidden())]
+
+    def _placer(self, rect, appliquer):
+        m = self.contentsMargins()
+        zone = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, haut_ligne = zone.x(), zone.y(), 0
+        ligne = []
+
+        def poser():
+            decalage = 0
+            if self._droite and ligne:
+                it, px, sh = ligne[-1]
+                decalage = max(0, zone.right() + 1 - (px + sh.width()))
+            for it, px, sh in ligne:
+                px += decalage
+                # centrer verticalement les éléments d'une même ligne
+                it.setGeometry(QRect(QPoint(px, y + (haut_ligne - sh.height()) // 2), sh))
+
+        for it in self._visibles():
+            sh = it.sizeHint()
+            if it.widget() is not None:
+                sh = sh.boundedTo(QSize(max(it.minimumSize().width(), zone.width()), sh.height()))
+            if ligne and x + sh.width() > zone.right() + 1:
+                if appliquer:
+                    poser()
+                x = zone.x()
+                y += haut_ligne + self._esp
+                haut_ligne = 0
+                ligne = []
+            ligne.append((it, x, sh))
+            x += sh.width() + self._esp
+            haut_ligne = max(haut_ligne, sh.height())
+        if appliquer:
+            poser()
+        return y + haut_ligne - rect.y() + m.bottom()
+
+
 def etiquette(texte, nom="aide", mots=True):
     lab = QLabel(texte)
     lab.setObjectName(nom)
@@ -581,6 +688,9 @@ class VueVideo(QWidget):
     zoneSelectionnee = Signal(int)   # zone choisie sur l'image (-1 : aucune)
     outilChange = Signal(str)
     doubleClique = Signal()
+    flechesChangees = Signal(object)  # IVS : liste de flèches {"nom", "a", "b", "nom_a", "nom_b", "alarme", "largeur"}
+    flecheSelectionnee = Signal(int)
+    flecheModeQuitte = Signal()
     OUTILS = (("rect", "Rectangle"), ("forme", "Déformable"), ("lasso", "Lasso"))
     CATEGORIES = (("vehicules", "o_vehicule"), ("personnes", "o_personne"), ("visages", "o_visage"),
                   ("plaques", "o_plaque"))
@@ -615,6 +725,8 @@ class VueVideo(QWidget):
         self._timer.setInterval(66 if compact else 33)
         self._timer.timeout.connect(self.update)
         self._timer.start()
+        from .ivs_vue import EditeurFleches
+        self.ivs = EditeurFleches(self)
 
     # --- données ---------------------------------------------------------------
     def definir_image(self, frame, ann=None, heure=0.0):
@@ -820,6 +932,13 @@ class VueVideo(QWidget):
         if self._image is None or not self.zone_active:
             return
         pos = e.position()
+        if self.ivs.actif:  # mode IVS : la souris trace et modifie les flèches, pas les zones
+            if e.button() == Qt.MouseButton.RightButton:
+                self.ivs.annuler()
+                self.ivs.menu(e)
+            else:
+                self.ivs.presser(e)
+            return
         if e.button() == Qt.MouseButton.RightButton:
             self._annuler_geste()
             self._menu_zones(e)
@@ -854,6 +973,12 @@ class VueVideo(QWidget):
 
     def mouseMoveEvent(self, e):
         pos = e.position()
+        if self.ivs.actif:
+            if self.ivs.geste is not None:
+                self.ivs.bouger(e)
+            elif self._image is not None:
+                self.ivs.curseur(pos)
+            return
         a = self._action
         if a is None:
             self._maj_curseur(pos, e.modifiers())
@@ -887,6 +1012,9 @@ class VueVideo(QWidget):
             a["boite"] = (min(x1, n[0]), min(y1, n[1]), max(x1, n[0]), max(y1, n[1]))
 
     def mouseReleaseEvent(self, e):
+        if self.ivs.geste is not None:
+            self.ivs.relacher(e)
+            return
         a, self._action = self._action, None
         if a is None:
             return
@@ -937,6 +1065,8 @@ class VueVideo(QWidget):
         return {"rect": b, "points": forme}
 
     def mouseDoubleClickEvent(self, e):
+        if self.ivs.actif:
+            return
         if self.zone_active and self._image is not None and e.button() == Qt.MouseButton.LeftButton:
             k = self._arete_sous(e.position())
             if k is not None:  # double-clic sur un côté de la zone sélectionnée : nouveau point
@@ -951,6 +1081,15 @@ class VueVideo(QWidget):
     def keyPressEvent(self, e):
         if not self.zone_active:
             return super().keyPressEvent(e)
+        if self.ivs.actif:
+            if e.key() == Qt.Key.Key_Escape:
+                if self.ivs.geste is not None:
+                    self.ivs.annuler()
+                else:
+                    self.ivs.selectionner(None)
+            elif e.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.ivs.sel is not None:
+                self.ivs.supprimer(self.ivs.sel)
+            return
         if e.key() == Qt.Key.Key_Escape:
             if self._action is not None:
                 self._annuler_geste()
@@ -1076,6 +1215,7 @@ class VueVideo(QWidget):
             p.drawImage(QRectF(ox, oy, w_, h_), self._image_a_taille(w_ * self.devicePixelRatioF(),
                                                                      h_ * self.devicePixelRatioF()))
             self._dessiner_zone(p, now, QRectF(ox, oy, w_, h_))
+            self.ivs.dessiner(p, now)
             self._dessiner_reperes(p, now, dt)
         else:
             self._dessiner_attente(p, cadre, now)

@@ -466,6 +466,13 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.moveTo(8.6, 15.6)
         pp.cubicTo(10.6, 14, 13.4, 14, 15.4, 15.6)
         pp.addEllipse(QPointF(12, 19), 1.1, 1.1)
+    elif nom == "fleche":  # IVS : flèche de franchissement A -> B
+        pp.addEllipse(3.5, 15.5, 5, 5)
+        pp.moveTo(7.6, 16.4)
+        pp.lineTo(19.5, 4.5)
+        pp.moveTo(12.5, 4.5)
+        pp.lineTo(19.5, 4.5)
+        pp.lineTo(19.5, 11.5)
     elif nom == "bouclier":  # pare-feu
         pp.moveTo(12, 3)
         pp.lineTo(19.5, 6)

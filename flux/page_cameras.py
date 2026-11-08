@@ -7,8 +7,8 @@ from urllib.parse import unquote, urlparse
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QListWidget,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
+                               QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QScrollArea, QSplitter, QStackedWidget, QTabBar,
                                QVBoxLayout,
                                QWidget)
@@ -18,9 +18,10 @@ from .config import NIVEAUX, niveau_effectif
 from .sources import Detecteur, dessiner, est_lien_web, slug
 from .page_groupes import DialogueGroupe, PageGroupe  # noqa: F401
 from .taches import en_arriere_plan
+from .ivs import fleches_options
 from .vision import copie_zone, point_dans_zone, zones_options
-from .widgets import (Bouton, BoutonX, Interrupteur, LabelElide, OutilsZone, Pastille, Repliable, VueVideo, Voyant, etiquette, ligne_option,
-                      separateur)
+from .widgets import (Bouton, BoutonX, Interrupteur, LabelElide, OutilsZone, Pastille, Rangee, Repliable, VueVideo, Voyant,
+                      etiquette, ligne_option, separateur)
 
 CHOIX_NIVEAUX = [("global", "Réglage global")] + [(k, v["nom"]) for k, v in NIVEAUX.items()] + [
     ("personnalise", "Personnalisé")]
@@ -93,7 +94,8 @@ class PageFlux(QWidget):
         self.o = {"niveau": p.get("niveau", "global"), "detection": bool(p.get("detection", True)),
                   "visages": bool(p.get("visages", False)),
                   "expressions": bool(p.get("expressions", False)), "plaques": bool(p.get("plaques", False)),
-                  "lire_plaques": bool(p.get("lire_plaques", False)), "enregistrer": False, "zones": zones}
+                  "lire_plaques": bool(p.get("lire_plaques", False)), "enregistrer": False, "zones": zones,
+                  "fleches": fleches_options(p)}
         self._construire(source)
         if self.onvif:
             self._charger_profils()
@@ -168,6 +170,10 @@ class PageFlux(QWidget):
         self.video.definir_zones(self.o["zones"])
         self.video.zonesChangees.connect(self._zones_changees)
         self.video.zoneSelectionnee.connect(self._zone_choisie_sur_image)
+        self.video.ivs.definir(self.o["fleches"])
+        self.video.flechesChangees.connect(self._fleches_changees)
+        self.video.flecheSelectionnee.connect(self._fleche_choisie_sur_image)
+        self.video.flecheModeQuitte.connect(lambda: self.b_tracer.setChecked(False))
         gauche.addWidget(self.video, 1)
         self.w_video.setMinimumWidth(320)
         self.w_video.installEventFilter(self)  # largeur changée : pastilles sur une ou deux lignes
@@ -245,6 +251,8 @@ class PageFlux(QWidget):
         col.addWidget(self.rep_lire)
         self.i_enreg = Interrupteur()
         col.addWidget(ligne_option("Enregistrer la vidéo annotée", self.i_enreg))
+
+        self._construire_ivs(col)
 
         col.addSpacing(4)
         col.addWidget(separateur())
@@ -431,6 +439,125 @@ class PageFlux(QWidget):
         avant, apres = self.cfg.get("clips.avant"), self.cfg.get("clips.apres")
         self.fen.toast(f"Enregistrement d'une vidéo ({avant:g} s avant + {apres:g} s après)…")
 
+    # --- IVS : flèches de franchissement ------------------------------------------------------
+    def _construire_ivs(self, col):
+        col.addSpacing(4)
+        col.addWidget(separateur())
+        col.addWidget(etiquette("IVS · FRANCHISSEMENT", "section"))
+        col.addWidget(etiquette("Tracez une flèche sur l'image, du point A vers le point B : une personne qui suit ce "
+                                "chemin est signalée (le sens inverse ne déclenche rien). Ex. A « Rayon » → B "
+                                "« Sortie de secours »."))
+        self.b_tracer = Bouton("Tracer des flèches", "discret", "fleche")
+        self.b_tracer.setCheckable(True)
+        self.b_tracer.setToolTip("Glissez sur l'image de A vers B. Tirez un bout pour le déplacer, le trait pour "
+                                 "déplacer la flèche. Clic droit : renommer, inverser, alarme, supprimer.")
+        self.b_tracer.toggled.connect(self._mode_trace)
+        col.addWidget(self.b_tracer)
+        self.liste_fleches = QListWidget()
+        self.liste_fleches.setMaximumHeight(96)
+        self.liste_fleches.currentRowChanged.connect(self._fleche_choisie_dans_liste)
+        self.liste_fleches.itemDoubleClicked.connect(lambda _it: self._renommer_fleche("nom"))
+        col.addWidget(self.liste_fleches)
+        self.w_fleche = QWidget()
+        g = QGridLayout(self.w_fleche)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(6)
+        self.champ_a, self.champ_b = QLineEdit(), QLineEdit()
+        for ligne, (lib, ch, cle) in enumerate((("Point A", self.champ_a, "nom_a"), ("Point B", self.champ_b, "nom_b"))):
+            ch.setMaxLength(40)
+            ch.setPlaceholderText("A" if cle == "nom_a" else "B")
+            ch.editingFinished.connect(lambda c=cle, w=ch: self._modifier_fleche(**{c: w.text().strip() or c[-1].upper()}))
+            g.addWidget(QLabel(lib), ligne, 0)
+            g.addWidget(ch, ligne, 1)
+        self.case_alarme = QCheckBox("Activer l'alarme (alerte + son sur ce PC)")
+        self.case_alarme.toggled.connect(lambda c: self._modifier_fleche(alarme=bool(c)))
+        g.addWidget(self.case_alarme, 2, 0, 1, 2)
+        g.setColumnStretch(1, 1)
+        col.addWidget(self.w_fleche)
+        h = Rangee(espacement=6)
+        for texte, f in (("Renommer", lambda: self._renommer_fleche("nom")), ("Inverser", self._inverser_fleche),
+                         ("Supprimer", self._supprimer_fleche), ("Tester l'alarme", lambda: self.fen.alarme.jouer(repetitions=1))):
+            b = Bouton(texte, "discret")
+            b.clicked.connect(f)
+            h.addWidget(b)
+            if texte != "Tester l'alarme":
+                self._boutons_fleche = getattr(self, "_boutons_fleche", []) + [b]
+        col.addLayout(h)
+        self._remplir_fleches()
+
+    def _mode_trace(self, actif):
+        self.video.ivs.regler_actif(actif)
+        self.b_tracer.setText("Terminer le tracé" if actif else "Tracer des flèches")
+        if actif:
+            self.video.setFocus()
+
+    def _remplir_fleches(self):
+        sel = self.video.ivs.sel
+        self.liste_fleches.blockSignals(True)
+        self.liste_fleches.clear()
+        for f in self.o["fleches"]:
+            self.liste_fleches.addItem(f"{f['nom']}   ·   {f['nom_a']} → {f['nom_b']}"
+                                       + ("   ·   alarme" if f["alarme"] else ""))
+        if not self.o["fleches"]:
+            self.liste_fleches.addItem("Aucune flèche")
+        if sel is not None and sel < len(self.o["fleches"]):
+            self.liste_fleches.setCurrentRow(sel)
+        self.liste_fleches.blockSignals(False)
+        self._maj_fiche_fleche()
+
+    def _fleche_courante(self):
+        i = self.video.ivs.sel
+        return i if i is not None and i < len(self.o["fleches"]) else None
+
+    def _maj_fiche_fleche(self):
+        i = self._fleche_courante()
+        f = self.o["fleches"][i] if i is not None else None
+        self.w_fleche.setEnabled(f is not None)
+        for b in getattr(self, "_boutons_fleche", []):
+            b.setEnabled(f is not None)
+        for w, v in ((self.champ_a, f["nom_a"] if f else ""), (self.champ_b, f["nom_b"] if f else "")):
+            if not w.hasFocus():
+                w.setText(v)
+        self.case_alarme.blockSignals(True)
+        self.case_alarme.setChecked(bool(f and f["alarme"]))
+        self.case_alarme.blockSignals(False)
+
+    def _fleches_changees(self, fleches):
+        self.o["fleches"] = [dict(f) for f in fleches]
+        self._remplir_fleches()
+        self.page.sauver()
+
+    def _fleche_choisie_sur_image(self, i):
+        self.liste_fleches.blockSignals(True)
+        self.liste_fleches.setCurrentRow(i if 0 <= i < len(self.o["fleches"]) else -1)
+        self.liste_fleches.blockSignals(False)
+        self._maj_fiche_fleche()
+
+    def _fleche_choisie_dans_liste(self, i):
+        self.video.ivs.selectionner(i if 0 <= i < len(self.o["fleches"]) else None, emettre=False)
+        self._maj_fiche_fleche()
+
+    def _modifier_fleche(self, **champs):
+        i = self._fleche_courante()
+        if i is not None and any(self.o["fleches"][i].get(k) != v for k, v in champs.items()):
+            self.video.ivs.modifier(i, **champs)
+
+    def _renommer_fleche(self, champ):
+        i = self._fleche_courante()
+        if i is not None:
+            self.video.ivs.renommer(i, champ)
+
+    def _inverser_fleche(self):
+        i = self._fleche_courante()
+        if i is not None:
+            self.video.ivs.inverser(i)
+
+    def _supprimer_fleche(self):
+        i = self._fleche_courante()
+        if i is not None:
+            self.video.ivs.supprimer(i)
+
     # --- zones ------------------------------------------------------------------------------
     def _remplir_zones(self):
         self.liste_zones.blockSignals(True)
@@ -614,6 +741,7 @@ class PageFlux(QWidget):
                 "detection": self.o["detection"], "visages": self.p_visages.isChecked(), "expressions": self.o["expressions"],
                 "plaques": self.o["plaques"], "lire_plaques": self.i_lire.isChecked(),
                 "zones": [dict(z) for z in self.o["zones"]], "actif": self.en_cours(),
+                "fleches": [dict(f) for f in self.o["fleches"]],
                 "onvif": self.onvif}
 
     # --- rafraîchissement ----------------------------------------------------------------
