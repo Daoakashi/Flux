@@ -422,10 +422,36 @@ class DialogueMaj(QDialog):
         self.b_plus_tard.setText("Redémarrer plus tard")
         texte = f"Version {res['version']} installée ({res['fichiers']} fichiers)."
         if res["dependances"]:
-            texte += (" Les dépendances ont changé : fermez Flux et relancez " + module_config.INSTALLATEUR + " avant de redémarrer.")
-            self.etat.setText(texte)
-            self.etat.setStyleSheet(f"color: {C['attention']};")
+            # nouveaux modules : installés ici même, sans installer.bat (indispensable en mode kiosque)
+            from . import mise_a_jour
+            self.b_plus_tard.setEnabled(False)
+            self.etat.setText(texte + " Installation des nouveaux modules…")
+            self.barre.setValue(0)
+            ch = Chargement()
+            ch.etape.connect(lambda t_, a: (self.etat.setText(f"{texte} {t_}"), self.barre.setValue(int(a * 1000))))
+            self._ch = ch
+            t = Tache(mise_a_jour.installer_dependances, progression=ch.etape.emit)
+            t.fini.connect(lambda r: self._modules_installes(texte, r, None))
+            t.echec.connect(lambda e: self._modules_installes(texte, None, e))
+            self._tache_dep = t.lancer()
             return
+        self._pret(texte)
+
+    def _modules_installes(self, texte, resume, erreur):
+        self.b_plus_tard.setEnabled(True)
+        if erreur:
+            self.fen.log_systeme(f"Mise à jour : modules non installés ({erreur}). Nouvel essai au prochain démarrage.",
+                                 "erreur")
+            texte += (f" Les nouveaux modules n'ont pas pu être installés ({erreur}). Flux réessaiera tout seul au "
+                      "prochain démarrage ; les fonctions qui en dépendent attendront.")
+            self.etat.setStyleSheet(f"color: {C['attention']};")
+        else:
+            self.fen.log_systeme(f"Mise à jour : nouveaux modules installés. {resume}", "ok")
+            texte += " Nouveaux modules installés."
+        self.barre.setValue(1000)
+        self._pret(texte)
+
+    def _pret(self, texte):
         self.etat.setText(texte + " Redémarrez Flux pour l'utiliser.")
         self.b_installer.setText("Redémarrer maintenant")
         self.b_installer.setEnabled(True)
@@ -587,6 +613,7 @@ class FenetrePrincipale(QMainWindow):
         from .central import AgentCentral
         self.central = AgentCentral(self)
         self.central.demarrer()  # attend sans rien envoyer tant que ce PC n'est pas relié à une console
+        QTimer.singleShot(4000, self._verifier_modules)
         from .telesurveillance import Telesurveillance
         self.telesurveillance = Telesurveillance(self)
         self.telesurveillance.demarrer()
@@ -798,6 +825,30 @@ class FenetrePrincipale(QMainWindow):
         elif cle == "frequentation":
             self.page_frequentation.actualiser_liste()
             self.page_frequentation.rafraichir()
+
+    def _verifier_modules(self):
+        """Démarrage : modules ajoutés par une mise à jour mais pas encore installés -> installation en arrière-plan,
+        sans installer.bat (le mode kiosque n'a pas à être quitté)."""
+        from . import mise_a_jour
+        try:
+            manquants = mise_a_jour.modules_manquants()
+        except Exception:  # noqa: BLE001
+            manquants = []
+        if not manquants and not mise_a_jour.dependances_en_attente():
+            return
+        self.log_systeme("Mise à jour : installation des nouveaux modules en arrière-plan"
+                         + (f" ({', '.join(manquants)})" if manquants else "") + "…", "info")
+
+        def fini(resume):
+            self.log_systeme(f"Mise à jour : nouveaux modules installés. {resume}", "ok")
+            self.toast("Nouveaux modules installés : redémarrez Flux quand vous voulez pour en profiter.", "ok")
+
+        def echec(e):
+            self.log_systeme(f"Mise à jour : modules non installés ({e}). Nouvel essai au prochain démarrage.", "erreur")
+        t = Tache(mise_a_jour.installer_dependances)
+        t.fini.connect(fini)
+        t.echec.connect(echec)
+        self._tache_modules = t.lancer()
 
     def demander_code_kiosque(self, titre):
         """Mode kiosque : code administrateur demandé avant une modification sensible."""

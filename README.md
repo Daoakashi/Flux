@@ -2,7 +2,7 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.11.0 alpha** · [Notes de version](CHANGELOG.txt)
+**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.11.1 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 
@@ -16,7 +16,7 @@ Guides détaillés : [LISEZMOI.txt](LISEZMOI.txt) (Windows) et [LISEZMOI-LINUX.t
 
 ## Mises à jour
 
-Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Réglages › Mises à jour. Vos réglages, votre base de données, vos modèles et la clé FluxLite ne sont jamais remplacés.
+Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Réglages › Mises à jour. Vos réglages, votre base de données, vos modèles et la clé FluxLite ne sont jamais remplacés. Si une version ajoute des modules Python, Flux les installe lui-même (pas besoin de relancer l'installateur, même en mode kiosque).
 
 **Publier une version** : mettez à jour `version.json`, ajoutez les notes en haut de `CHANGELOG.txt`, puis onglet **Actions › Publier une version de Flux › Run workflow**.
 

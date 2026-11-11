@@ -1,3 +1,12 @@
+Beta Version 0.11.1 alpha
+* Corrections
+  - Mises à jour : quand une version ajoute des modules Python, Flux les installe lui-même, sans
+    fenêtre et sans relancer installer.bat / installer.sh. Plus besoin de quitter le mode kiosque.
+    En cas d'échec (pas d'Internet…), Flux réessaie tout seul au démarrage suivant ; les fonctions
+    concernées (ex. envoi SFTP) attendent simplement le module.
+  - Au démarrage, Flux vérifie qu'aucun module de requirements.txt ne manque et installe ceux qui
+    manquent en arrière-plan (cas d'une mise à jour faite avec une ancienne version).
+
 Beta Version 0.11.0 alpha
 + Ajouts
   - Nouvel onglet « Télésurveillance » : Flux transmet son journal en temps réel aux centrales de

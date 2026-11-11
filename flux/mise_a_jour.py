@@ -276,9 +276,106 @@ def installer(cfg, info, racine=config.RACINE, progression=None):
         restaurer(racine, sauvegarde)
         raise ErreurMaj(f"installation interrompue ({e}) : l'ancienne version a été remise en place") from None
     req_change = _empreinte(os.path.join(racine, "requirements.txt")) != req_avant
+    if req_change:
+        marquer_dependances(True)  # installées juste après (ou au prochain démarrage si ça échoue)
     etape("Terminé", 1.0)
     return {"fichiers": len(a_copier), "sauvegarde": sauvegarde, "dependances": req_change, "retires": retires,
             "version": info.get("libelle") or info.get("version")}
+
+
+MARQUE_DEPENDANCES = os.path.join(config.RACINE, "fluxlite", "dependances_a_installer")
+
+
+def marquer_dependances(a_faire=True):
+    """Retient qu'il reste des dépendances à installer (réessai automatique au prochain démarrage)."""
+    try:
+        if a_faire:
+            os.makedirs(os.path.dirname(MARQUE_DEPENDANCES), exist_ok=True)
+            with open(MARQUE_DEPENDANCES, "w", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
+        elif os.path.exists(MARQUE_DEPENDANCES):
+            os.remove(MARQUE_DEPENDANCES)
+    except OSError:
+        pass
+
+
+def dependances_en_attente():
+    return os.path.exists(MARQUE_DEPENDANCES)
+
+
+def modules_manquants(racine=config.RACINE):
+    """Modules de requirements.txt absents de ce Python (vérification rapide, sans réseau)."""
+    from importlib import metadata
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:
+        try:  # toujours présent avec pip
+            from pip._vendor.packaging.requirements import Requirement
+        except ImportError:
+            Requirement = None
+    manquants = []
+    try:
+        lignes = open(os.path.join(racine, "requirements.txt"), encoding="utf-8").read().splitlines()
+    except OSError:
+        return []
+    for ligne in lignes:
+        ligne = ligne.split(" #")[0].strip()
+        if not ligne or ligne.startswith(("#", "-")):
+            continue
+        nom = re.split(r"[\[<>=!~; ]", ligne, 1)[0]
+        if Requirement is not None:
+            try:
+                r = Requirement(ligne)
+                if r.marker is not None and not r.marker.evaluate():
+                    continue  # module prévu pour un autre système
+                nom = r.name
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            metadata.version(nom)
+        except metadata.PackageNotFoundError:
+            manquants.append(nom)
+    return manquants
+
+
+def installer_dependances(racine=config.RACINE, progression=None, delai=1800):
+    """Installe les nouveaux modules Python de requirements.txt avec le Python de Flux, sans fenêtre et sans
+    relancer installer.bat / installer.sh (indispensable en mode kiosque). Seuls les modules manquants ou trop
+    anciens sont installés ; ceux déjà présents ne sont pas touchés. Renvoie le résumé de pip."""
+    import subprocess
+    import sys
+    req = os.path.join(racine, "requirements.txt")
+    if not os.path.isfile(req):
+        return "aucun fichier requirements.txt"
+    cmd = [sys.executable, "-m", "pip", "install", "-r", req, "--disable-pip-version-check", "--no-input",
+           "--progress-bar", "off"]
+    options = {}
+    if os.name == "nt":
+        options["creationflags"] = 0x08000000  # CREATE_NO_WINDOW : aucune fenêtre noire
+    marquer_dependances(True)
+    if progression:
+        progression("Installation des nouveaux modules (peut prendre quelques minutes)…", 0.05)
+    proc = subprocess.Popen(cmd, cwd=racine, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", **options)
+    lignes = []
+    debut = time.time()
+    for ligne in proc.stdout:
+        ligne = ligne.strip()
+        if not ligne:
+            continue
+        lignes.append(ligne)
+        if progression and (ligne.startswith(("Collecting", "Downloading", "Installing", "Successfully"))):
+            progression(ligne[:90], min(0.95, 0.05 + (time.time() - debut) / 300))
+        if time.time() - debut > delai:
+            proc.kill()
+            raise ErreurMaj("installation des modules trop longue (connexion Internet ?)")
+    code = proc.wait()
+    if code != 0:
+        erreur = next((x for x in reversed(lignes) if x.startswith("ERROR")), lignes[-1] if lignes else f"code {code}")
+        raise ErreurMaj(f"pip n'a pas pu installer les modules : {erreur[:200]}")
+    marquer_dependances(False)
+    fin = next((x for x in reversed(lignes) if x.startswith("Successfully installed")), "")
+    return fin.replace("Successfully installed", "Installé :").strip() or "Tous les modules étaient déjà à jour."
 
 
 def empreinte_attendue(texte_sommes, nom):
