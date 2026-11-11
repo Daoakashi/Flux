@@ -1,3 +1,24 @@
+Beta Version 0.11.0 alpha
++ Ajouts
+  - Nouvel onglet « Télésurveillance » : Flux transmet son journal en temps réel aux centrales de
+    télésurveillance tierces, sans programme supplémentaire, dans les protocoles du métier :
+    · SIA DC-09 (alarmes sur IP), au format SIA (SIA-DCS) ou Contact ID (Ademco, ADM-CID), en TCP
+      (par défaut) ou UDP, compatible avec les logiciels de réception d'alarmes du marché ;
+    · numéro de client (compte) fourni par la centrale, préfixes récepteur et ligne, secteur ;
+    · chiffrement AES-128, 192 ou 256 avec la clé de la centrale (format hexadécimal ou texte) ;
+    · accusé de réception obligatoire : sans réponse, Flux réessaie, passe au récepteur de secours,
+      puis garde les alarmes en file d'attente sur le disque (rien n'est perdu, même après un
+      redémarrage) ; un accusé falsifié ou non chiffré est refusé ;
+    · supervision régulière (message NULL) et test automatique (RP / 602) au choix ;
+    · images et vidéos déposées sur le serveur de la centrale : FTPS, SFTP, HTTPS (chiffrés) ou
+      FTP / HTTP (avec avertissement) ; le nom du fichier est indiqué dans l'alarme pour que
+      l'opérateur ouvre la bonne image ; clé SFTP mémorisée au premier contact (anti-usurpation) ;
+    · tableau des événements transmis (alerte, liste noire, IVS, zone, stationnement, plaque…) avec
+      leurs codes SIA et Contact ID modifiables, image et vidéo au choix ;
+    · numéro de zone de chaque caméra, nom du site, bouton « Tester », journal d'envoi.
+  - Coffre à secrets : clés AES et mots de passe des centrales enregistrés chiffrés sur le disque
+    (protégés par Windows sur un PC Windows).
+
 Beta Version 0.10.5 alpha
 * Corrections
   - IVS : une flèche tracée en hauteur (au niveau d'un comptoir, d'une porte, d'un rayon) ne se

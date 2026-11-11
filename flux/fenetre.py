@@ -34,7 +34,8 @@ from . import kiosque
 
 PAGES = [("cameras", "Caméras", "cameras"), ("lecteur", "Lecteur", "lecteur"), ("personnes", "Personnes", "personnes"),
          ("journal", "Journal", "journal"), ("frequentation", "Fréquentation", "frequentation"),
-         ("mobile", "FluxLite", "telephone"), ("reglages", "Réglages", "reglages")]
+         ("mobile", "FluxLite", "telephone"), ("telesurveillance", "Télésurveillance", "bouclier"),
+         ("reglages", "Réglages", "reglages")]
 
 
 # ---------------------------------------------------------------------------
@@ -586,12 +587,18 @@ class FenetrePrincipale(QMainWindow):
         from .central import AgentCentral
         self.central = AgentCentral(self)
         self.central.demarrer()  # attend sans rien envoyer tant que ce PC n'est pas relié à une console
+        from .telesurveillance import Telesurveillance
+        self.telesurveillance = Telesurveillance(self)
+        self.telesurveillance.demarrer()
+        from .page_telesurveillance import PageTelesurveillance
+        self.page_telesurveillance = PageTelesurveillance(self)
         from .page_frequentation import PageFrequentation
         self.page_frequentation = PageFrequentation(self)
         self.page_reglages = PageReglages(self)
         self.pages = {"cameras": self.page_cameras, "lecteur": self.page_lecteur, "personnes": self.page_personnes,
                       "journal": self.page_journal, "frequentation": self.page_frequentation,
-                      "mobile": self.page_mobile, "reglages": self.page_reglages}
+                      "mobile": self.page_mobile, "telesurveillance": self.page_telesurveillance,
+                      "reglages": self.page_reglages}
         for p in self.pages.values():
             self.pile.addWidget(p)
         zv.addWidget(self.pile)
@@ -791,6 +798,11 @@ class FenetrePrincipale(QMainWindow):
         elif cle == "frequentation":
             self.page_frequentation.actualiser_liste()
             self.page_frequentation.rafraichir()
+
+    def demander_code_kiosque(self, titre):
+        """Mode kiosque : code administrateur demandé avant une modification sensible."""
+        d = DialogueKiosque(self, titre, "Mode kiosque : tapez le code administrateur pour continuer.", "Valider")
+        return d.exec() == QDialog.DialogCode.Accepted
 
     def maj_badge_fluxlite(self):
         """Pastille sur « FluxLite » : nombre de comptes qui attendent votre validation."""
@@ -1191,6 +1203,10 @@ class FenetrePrincipale(QMainWindow):
             self._journaliser(e)
             self.page_mobile.evenement(e)
             self.central.evenement(e)
+            try:
+                self.telesurveillance.evenement(e)
+            except Exception as ex:  # noqa: BLE001  — la télésurveillance ne doit jamais bloquer l'interface
+                self.log_systeme(f"Télésurveillance : {ex}", "erreur")
             if e.get("source") == "FluxLite" and "à valider" in e.get("texte", ""):
                 self.maj_badge_fluxlite()
             try:
@@ -1251,6 +1267,7 @@ class FenetrePrincipale(QMainWindow):
             self.page_cameras.sauver()  # avant l'arrêt, pour mémoriser les caméras actives
         self.page_lecteur.arreter()
         self.central.arreter()
+        self.telesurveillance.arreter()
         self.page_mobile.fermer()
         self.page_cameras.tout_arreter()
         self.cfg.sauver()

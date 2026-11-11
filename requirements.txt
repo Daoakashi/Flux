@@ -28,3 +28,4 @@ segno>=1.6
 
 # Liens YouTube, Instagram, etc.
 yt-dlp[default]>=2026.8.19  # inclut yt-dlp-ejs, requis pour YouTube (avec Deno)
+paramiko>=3.4  # facultatif : envoi SFTP des images aux centrales de télésurveillance

@@ -2,7 +2,7 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.9.6 alpha** · [Notes de version](CHANGELOG.txt)
+**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.11.0 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 
@@ -24,6 +24,10 @@ Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Régl
 
 Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. Activez le serveur dans la page **FluxLite**, puis scannez le QR code depuis l'application. Chaque entreprise ne voit que les caméras que vous lui attribuez. Les mêmes comptes ouvrent aussi l'**interface web** : **`https://flux.local`** (ou `https://<adresse du PC>:47810`) dans n'importe quel navigateur du même réseau (adresses affichées dans la page FluxLite ; à la première visite, acceptez le certificat créé par ce PC). Si un autre appareil n'y arrive pas, bouton « Autoriser dans le pare-feu » de la page FluxLite. Nom réglable (et nom de domaine personnel, DuckDNS compris) dans Réglages › Développeur. Connexion chiffrée et liée à la clé de ce PC ; la clé est conservée par les mises à jour (dossier `fluxlite`, à sauvegarder).
 
+## Télésurveillance (centrales tierces)
+
+Onglet **Télésurveillance** : Flux transmet ses alertes en temps réel aux centrales de télésurveillance, dans les protocoles qu'elles utilisent déjà : **SIA DC-09** au format **SIA** ou **Contact ID**, TCP ou UDP, chiffrement AES avec la clé de la centrale, numéro de client, accusé de réception, récepteur de secours et supervision. Les images et vidéos sont déposées sur le serveur de la centrale (FTPS, SFTP, HTTPS, ou FTP/HTTP). Les alarmes non accusées attendent sur le disque et repartent dès que la centrale répond. À demander à la centrale : adresse IP et port du récepteur, protocole, numéro de client, clé AES et accès au serveur de fichiers.
+
 ## Configuration conseillée
 
 - **Carte NVIDIA** : tous les niveaux de scan, y compris Précis et Maximum.
@@ -31,7 +35,7 @@ Vos clients voient les caméras et reçoivent les alertes sur leur téléphone. 
 
 ## Données personnelles
 
-Visages et plaques sont des données personnelles (RGPD). Informez les personnes filmées, limitez la durée de conservation et ne filmez pas au-delà de votre propriété. Flux fonctionne en local : aucune image ne quitte l'ordinateur, sauf les mails et notifications que vous configurez.
+Visages et plaques sont des données personnelles (RGPD). Informez les personnes filmées, limitez la durée de conservation et ne filmez pas au-delà de votre propriété. Flux fonctionne en local : aucune image ne quitte l'ordinateur, sauf les mails, notifications et centrales de télésurveillance que vous configurez.
 
 ## Juridique, licence et IA
 
