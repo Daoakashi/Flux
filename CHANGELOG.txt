@@ -1,3 +1,11 @@
+Beta Version 0.11.2 alpha
++ Ajouts
+  - Mode kiosque sans terminal : Réglages › Mode kiosque (Linux) permet d'activer le kiosque (code
+    administrateur, redémarrage nocturne, blocage des terminaux), de changer le code et de le désactiver.
+    Une fenêtre du système demande le mot de passe du PC ; plus de commande « sudo bash kiosque.sh ».
+  - Raccourci pour quitter le kiosque avec le clavier visuel : bouton ⏻ dans la barre du clavier et
+    « ⏻ Quitter » dans la barre d'état (code administrateur demandé, comme Ctrl+Alt+Maj+Q).
+
 Beta Version 0.11.1 alpha
 * Corrections
   - Mises à jour : quand une version ajoute des modules Python, Flux les installe lui-même, sans
