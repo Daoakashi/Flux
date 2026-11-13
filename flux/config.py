@@ -104,7 +104,8 @@ CATEGORIES = [
     ("ivs", "IVS et alarme sonore"), ("alertes", "Alertes et mail"), ("notifications", "Notifications (téléphone)"),
     ("fluxlite", "FluxLite (application Android)"), ("clips", "Vidéos des passages"), ("stockage", "Espace disque"),
     ("lecteur", "Lecteur vidéo"), ("central", "Supervision centrale"),
-    ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("developpeur", "Développeur"),
+    ("onvif", "Caméras ONVIF"), ("maj", "Mises à jour"), ("systeme", "Système"), ("kiosque", "Mode kiosque (Linux)"),
+    ("developpeur", "Développeur"),
 ]
 CATEGORIES_CACHEES = {"developpeur"}  # visibles seulement en mode développeur
 

@@ -89,7 +89,10 @@ MODE KIOSQUE (le PC n'affiche que Flux)
 Pour un poste de surveillance dédié : au démarrage, le PC ouvre directement Flux en plein écran,
 sans bureau ni barre des tâches. Flux ne peut pas être fermé, se relance tout seul s'il plante ou
 après une mise à jour, et l'écran ne se met jamais en veille.
-  Activer (Flux déjà installé, terminal ouvert dans le dossier de Flux) :
+  Sans terminal : dans Flux, Réglages › Mode kiosque › « Activer le mode kiosque » (une fenêtre du système
+  demande le mot de passe du PC, puis Flux demande le code administrateur). Désactiver et changer le code s'y
+  trouvent aussi.
+  Ou avec un terminal ouvert dans le dossier de Flux (Flux déjà installé) :
       sudo bash kiosque.sh activer
     Un code administrateur est demandé : il sert à quitter le kiosque. Options :
       --redemarrage 4     redémarre le PC chaque nuit à 4 h (conseillé pour un poste 24h/24)

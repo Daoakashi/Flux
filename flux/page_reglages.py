@@ -2,6 +2,7 @@
 de la fenêtre, réinitialisation individuelle, import et export."""
 
 import os
+import sys
 
 from PySide6.QtCore import QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
@@ -349,7 +350,8 @@ class PageReglages(QWidget):
 
     def _categories_visibles(self):
         dev = self.cfg.get("developpeur.actif")
-        return [(c, l) for c, l in CATEGORIES if dev or c not in CATEGORIES_CACHEES]
+        return [(c, l) for c, l in CATEGORIES if (dev or c not in CATEGORIES_CACHEES)
+                and (c != "kiosque" or sys.platform.startswith("linux"))]
 
     def _remplir_categories(self):
         actuelle = self.categories.currentItem().data(Qt.ItemDataRole.UserRole) if self.categories.currentItem() else None
@@ -499,6 +501,9 @@ class PageReglages(QWidget):
         if cat == "stockage":
             from .entetes_reglages import entete_stockage
             return entete_stockage(self)
+        if cat == "kiosque":
+            from .entetes_reglages import entete_kiosque
+            return entete_kiosque(self)
         if cat == "maj":
             from .entetes_reglages import entete_maj
             return entete_maj(self)

@@ -642,3 +642,181 @@ def entete_central(page):
     minuterie.start(2000)
     maj()
     return w
+
+
+# ---------------------------------------------------------------------------
+# Mode kiosque (Linux) : activer / désactiver sans terminal
+# ---------------------------------------------------------------------------
+class DialogueCodeKiosque(QDialog):
+    """Choix du code administrateur du kiosque (saisi deux fois ; le clavier visuel peut servir)."""
+
+    def __init__(self, parent, titre="Code administrateur du kiosque"):
+        super().__init__(parent)
+        self.setWindowTitle(titre)
+        self.setMinimumWidth(420)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(22, 20, 22, 18)
+        v.setSpacing(10)
+        t = QLabel(titre)
+        t.setObjectName("titre")
+        v.addWidget(t)
+        v.addWidget(etiquette("Ce code sert à quitter le kiosque (Ctrl+Alt+Maj+Q, bouton ⏻) et à modifier le réseau ou "
+                              "la télésurveillance en kiosque. 4 caractères minimum. Il n'est jamais enregistré en clair."))
+        self.a = QLineEdit()
+        self.b = QLineEdit()
+        for champ, texte in ((self.a, "Code administrateur"), (self.b, "Retapez le code")):
+            champ.setEchoMode(QLineEdit.EchoMode.Password)
+            champ.setPlaceholderText(texte)
+            v.addWidget(champ)
+        self.lbl = etiquette("")
+        self.lbl.setStyleSheet(f"color: {C['danger']};")
+        v.addWidget(self.lbl)
+        h = QHBoxLayout()
+        h.addStretch(1)
+        b0 = Bouton("Annuler")
+        b0.setAutoDefault(False)
+        b0.clicked.connect(self.reject)
+        b1 = Bouton("Continuer", "primaire")
+        b1.setDefault(True)
+        b1.clicked.connect(self._ok)
+        h.addWidget(b0)
+        h.addWidget(b1)
+        v.addLayout(h)
+        self.a.setFocus()
+
+    def code(self):
+        return self.a.text()
+
+    def _ok(self):
+        if len(self.a.text()) < 4:
+            self.lbl.setText("Trop court : 4 caractères minimum.")
+        elif self.a.text() != self.b.text():
+            self.lbl.setText("Les deux codes sont différents.")
+        else:
+            self.accept()
+
+
+def entete_kiosque(page):
+    import getpass
+    from PySide6.QtWidgets import QCheckBox, QSpinBox
+    from . import kiosque
+    fen = page.fen
+    w, v = _boite()
+    if kiosque.actif():
+        v.addWidget(etiquette("Le mode kiosque est actif sur ce PC. Pour le désactiver ou changer son code, quittez "
+                              "d'abord le kiosque (bouton ⏻ du clavier visuel ou « ⏻ Quitter » en bas de la fenêtre), "
+                              "puis ouvrez cette page depuis votre session habituelle."))
+        return w
+    v.addWidget(etiquette(
+        "Le PC démarre directement sur Flux, en plein écran, sans bureau ni barre des tâches ; Flux se relance tout "
+        "seul et l'écran ne se met jamais en veille. Une fenêtre du système demandera le mot de passe de ce PC "
+        "(administrateur) : aucun terminal n'est nécessaire. Linux Mint, Ubuntu ou Debian (écran de connexion "
+        "LightDM ou GDM) ; Flux doit être installé avec installer.sh."))
+    etat = etiquette("")
+    v.addWidget(etat)
+    # options
+    ligne = Rangee()
+    c_redem = QCheckBox("Redémarrer le PC chaque nuit à")
+    h_redem = QSpinBox()
+    h_redem.setRange(0, 23)
+    h_redem.setValue(4)
+    h_redem.setSuffix(" h")
+    c_verrou = QCheckBox("Bloquer les terminaux (Ctrl+Alt+F1…F6)")
+    ligne.addWidget(c_redem)
+    ligne.addWidget(h_redem)
+    v.addLayout(ligne)
+    v.addWidget(c_verrou)
+    v.addWidget(etiquette("Avec les terminaux bloqués, la seule sortie est Ctrl+Alt+Maj+Q (ou ⏻) puis le code."))
+    boutons = Rangee()
+    b_act = Bouton("Activer le mode kiosque", "primaire")
+    b_code = Bouton("Changer le code", "discret")
+    b_des = Bouton("Désactiver", "danger")
+    for b in (b_act, b_code, b_des):
+        boutons.addWidget(b)
+    v.addLayout(boutons)
+    sortie = QPlainTextEdit()
+    sortie.setReadOnly(True)
+    sortie.setMaximumHeight(170)
+    sortie.setVisible(False)
+    v.addWidget(sortie)
+
+    def maj():
+        e = kiosque.etat()
+        if e["installe"]:
+            txt = (f"Mode kiosque ACTIF — compte : {e['utilisateur'] or '?'} · code : "
+                   f"{'défini' if e['code'] else 'absent'}"
+                   + (f" · redémarrage chaque nuit à {e['redemarrage']} h" if e["redemarrage"] else "")
+                   + (" · terminaux bloqués" if e["verrou"] else ""))
+        else:
+            txt = "Mode kiosque inactif."
+        etat.setText(txt)
+        b_act.setText("Réappliquer les options" if e["installe"] else "Activer le mode kiosque")
+        b_code.setVisible(e["installe"])
+        b_des.setVisible(e["installe"])
+        h_redem.setEnabled(c_redem.isChecked())
+
+    def lancer(action, code=None, fini_message=""):
+        for b in (b_act, b_code, b_des):
+            b.setEnabled(False)
+        sortie.setVisible(True)
+        sortie.setPlainText("Autorisez l'opération dans la fenêtre du système (mot de passe de ce PC)…\n"
+                            "L'installation d'Openbox peut prendre une minute.")
+        heure = str(h_redem.value()) if c_redem.isChecked() else ""
+
+        def travail():
+            return kiosque.lancer(action, utilisateur=getpass.getuser(), heure=heure,
+                                  verrouiller=c_verrou.isChecked(), code=code)
+
+        def fin(res):
+            try:
+                for b in (b_act, b_code, b_des):
+                    b.setEnabled(True)
+                ok, texte = res
+                sortie.setPlainText(texte or ("Terminé." if ok else "Échec."))
+                maj()
+            except RuntimeError:
+                return
+            if not ok:
+                fen.toast("Le kiosque n'a pas été modifié (détails dans le cadre sous les boutons).", "erreur")
+                return
+            fen.cfg_journal_kiosque(fini_message)
+            if action == "activer":
+                r = QMessageBox.question(page, "Mode kiosque activé",
+                                         "Le mode kiosque est activé. Redémarrer le PC maintenant pour l'essayer ?")
+                if r == QMessageBox.StandardButton.Yes:
+                    import subprocess
+                    try:
+                        subprocess.Popen(["systemctl", "reboot"])
+                    except OSError:
+                        fen.toast("Redémarrage impossible : redémarrez le PC à la main.", "erreur")
+            else:
+                fen.toast(fini_message, "ok")
+
+        en_arriere_plan(travail, fin, lambda e: fin((False, e)))
+
+    def activer():
+        code = None
+        if not kiosque.etat()["code"]:
+            d = DialogueCodeKiosque(page)
+            if d.exec() != QDialog.DialogCode.Accepted:
+                return
+            code = d.code()
+        lancer("activer", code, "Mode kiosque activé depuis Flux")
+
+    def changer_code():
+        d = DialogueCodeKiosque(page, "Nouveau code administrateur")
+        if d.exec() == QDialog.DialogCode.Accepted:
+            lancer("code", d.code(), "Code administrateur du kiosque changé")
+
+    def desactiver():
+        r = QMessageBox.question(page, "Désactiver le kiosque",
+                                 "Au prochain démarrage, le PC reviendra à l'écran de connexion habituel. Continuer ?")
+        if r == QMessageBox.StandardButton.Yes:
+            lancer("desactiver", None, "Mode kiosque désactivé depuis Flux")
+
+    c_redem.toggled.connect(lambda _c: maj())
+    b_act.clicked.connect(activer)
+    b_code.clicked.connect(changer_code)
+    b_des.clicked.connect(desactiver)
+    maj()
+    return w

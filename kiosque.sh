@@ -15,6 +15,7 @@
 #  Options de « activer » :
 #     --utilisateur NOM     compte qui fait tourner Flux (par defaut : le votre)
 #     --redemarrage HEURE   redemarre le PC chaque nuit a cette heure (ex. : 4)
+#     --code-stdin          lit le code sur l'entree standard (utilise par Flux : Reglages > Mode kiosque)
 #     --verrouiller         bloque aussi Ctrl+Alt+F1...F6 (terminaux) : plus de sortie
 #                           sans le code administrateur ou une connexion SSH
 #
@@ -55,8 +56,13 @@ gestionnaire_connexion() {
     echo "$dm"
 }
 
+CODE_STDIN=no
 demander_code() {
     local a b
+    if [ "$CODE_STDIN" = yes ]; then       # appele depuis Flux (Reglages > Mode kiosque) : code sur l'entree standard
+        IFS= read -r a || a=""
+        [ "${#a}" -ge 4 ] || erreur "Code administrateur trop court (4 caracteres minimum)."
+    else
     while true; do
         read -r -s -p "      Choisissez un code administrateur (4 caracteres minimum) : " a; echo
         [ "${#a}" -ge 4 ] || { alerte "trop court."; continue; }
@@ -64,6 +70,7 @@ demander_code() {
         [ "$a" = "$b" ] && break
         alerte "les deux codes sont differents, recommencez."
     done
+    fi
     # empreinte PBKDF2 : le code n'est jamais enregistre en clair
     FLUX_CODE="$a" python3 - "$CODE" <<'PY' || erreur "Impossible d'enregistrer le code (python3 est-il installe ?)."
 import hashlib, json, os, sys
@@ -87,6 +94,7 @@ activer() {
             --utilisateur) UTIL="${2:-}"; shift ;;
             --redemarrage) HEURE="${2:-}"; shift ;;
             --verrouiller) VERROU=yes ;;
+            --code-stdin) CODE_STDIN=yes ;;
             *) erreur "Option inconnue : $1" ;;
         esac
         shift
@@ -346,7 +354,7 @@ etat() {
 case "${1:-}" in
     activer)    shift; activer "$@" ;;
     desactiver) desactiver ;;
-    code)       besoin_root code; mkdir -p "$ETC"; demander_code ;;
+    code)       besoin_root code; [ "${2:-}" = "--code-stdin" ] && CODE_STDIN=yes; mkdir -p "$ETC"; demander_code ;;
     etat)       etat ;;
     *)
         echo "Utilisation :"
