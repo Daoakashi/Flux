@@ -658,6 +658,12 @@ class FenetrePrincipale(QMainWindow):
         self.st_clavier.mousePressEvent = lambda _e: self.clavier.basculer()
         self.st_clavier.setVisible(self.kiosque or self.cfg.get("clavier.mode") != "non")
         sb.addPermanentWidget(self.st_clavier)
+        if self.kiosque:  # raccourci à la souris : Ctrl+Alt+Maj+Q n'est pas tapable sans clavier physique
+            self.st_quitter = QLabel("⏻ Quitter")
+            self.st_quitter.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.st_quitter.setToolTip("Quitter le mode kiosque (code administrateur, saisi avec le clavier visuel)")
+            self.st_quitter.mousePressEvent = lambda _e: QTimer.singleShot(0, self.quitter_kiosque)
+            sb.addPermanentWidget(self.st_quitter)
         sb.addPermanentWidget(self.st_reseau)
         sb.addPermanentWidget(self.st_maj)
         sb.addPermanentWidget(self.st_notif)

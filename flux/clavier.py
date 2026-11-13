@@ -95,8 +95,12 @@ class FenetreClavier(QFrame):
         self.titre = QLabel("Clavier visuel — glissez ici pour déplacer")
         self.titre.setObjectName("aide")
         hb.addWidget(self.titre, 1)
-        for txt, info, f in (("A−", "Plus petit", lambda: self.g.taille(-1)), ("A+", "Plus grand", lambda: self.g.taille(1)),
-                             ("▾", "Réduire", self.reduire), ("✕", "Fermer", self.g.fermer)):
+        boutons = [("A−", "Plus petit", lambda: self.g.taille(-1)), ("A+", "Plus grand", lambda: self.g.taille(1)),
+                   ("▾", "Réduire", self.reduire), ("✕", "Fermer", self.g.fermer)]
+        if getattr(gestion.fen, "kiosque", False):
+            # Raccourci pour les postes sans clavier physique : équivaut à Ctrl+Alt+Maj+Q (code administrateur demandé)
+            boutons.insert(0, ("⏻", "Quitter le mode kiosque (code administrateur)", self.g.quitter_kiosque))
+        for txt, info, f in boutons:
             b = QPushButton(txt)
             b.setToolTip(info)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -320,6 +324,11 @@ class GestionClavier(QObject):
     # --- focus ---------------------------------------------------------------------------------------
     def _dans_clavier(self, w):
         return w is not None and (w is self.fk or self.fk.isAncestorOf(w))
+
+    def quitter_kiosque(self):
+        """Bouton ⏻ du clavier : même chose que Ctrl+Alt+Maj+Q (le clavier se rattache à la fenêtre du code)."""
+        if self.fen is not None:
+            QTimer.singleShot(0, self.fen.quitter_kiosque)
 
     def rendre_focus(self):
         """Le clavier a pris la main : la rendre à la fenêtre et au champ où l'on écrivait."""
