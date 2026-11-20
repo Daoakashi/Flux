@@ -8,6 +8,11 @@ name: Publier une version de Flux
 
 on:
   workflow_dispatch:
+    inputs:
+      remplacer:
+        description: "Remplacer la version si elle est déjà publiée (à n'utiliser que juste après une publication ratée)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,6 +31,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1 && [ "${{ inputs.remplacer }}" = "true" ]; then
+            echo "Version ${{ steps.v.outputs.tag }} remplacée à la demande."
+            gh release delete "${{ steps.v.outputs.tag }}" --cleanup-tag --yes
+          fi
           if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
             echo "::error::La version ${{ steps.v.outputs.tag }} est déjà publiée. Augmentez le numéro dans version.json."
             exit 1
