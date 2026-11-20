@@ -2,7 +2,7 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.12.0 alpha** · [Notes de version](CHANGELOG.txt)
+**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.12.1 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 

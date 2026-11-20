@@ -1,3 +1,9 @@
+Beta Version 0.12.1 alpha
++ Ajouts
+  - Première version livrée avec l'adresse du serveur Flux (Cloudflare) et la clé de vérification des
+    mises à jour : à partir d'ici, les mises à jour arrivent par le serveur Flux (signées, vérifiées avant
+    installation, GitHub en secours) et FluxLite / Flux Remote passent par lui en 4G.
+
 Beta Version 0.12.0 alpha
 + Ajouts
   - Serveur Flux sur Cloudflare (Flux Central) : nouvelle source des mises à jour. Chaque version y est
