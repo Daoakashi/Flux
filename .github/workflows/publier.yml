@@ -44,7 +44,7 @@ jobs:
         env:
           FLUX_MAJ_CLE: ${{ secrets.FLUX_MAJ_CLE }}
           PUBLICATION_TOKEN: ${{ secrets.PUBLICATION_TOKEN }}
-          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL }}
+          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL || secrets.FLUX_NUAGE_URL || 'https://flux-central.flux-dms.workers.dev' }}
         run: |
           pip install --quiet "cryptography>=42"
           python3 .github/scripts/publier_nuage.py preparer
@@ -64,7 +64,7 @@ jobs:
         env:
           FLUX_MAJ_CLE: ${{ secrets.FLUX_MAJ_CLE }}
           PUBLICATION_TOKEN: ${{ secrets.PUBLICATION_TOKEN }}
-          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL }}
+          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL || secrets.FLUX_NUAGE_URL || 'https://flux-central.flux-dms.workers.dev' }}
           FLUX_TAG: ${{ steps.v.outputs.tag }}
           FLUX_TITRE: ${{ steps.v.outputs.titre }}
         run: python3 .github/scripts/publier_nuage.py envoyer
