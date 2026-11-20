@@ -381,9 +381,10 @@ class DialogueMaj(QDialog):
         self.b_ignorer = Bouton("Ignorer cette version", "fantome")
         self.b_ignorer.clicked.connect(self._ignorer)
         h.addWidget(self.b_ignorer)
-        b = Bouton("Voir sur GitHub", "discret")
-        b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(info["page"])))
-        h.addWidget(b)
+        if str(info.get("page", "")).startswith("https://github.com/") and not getattr(fen, "kiosque", False):
+            b = Bouton("Voir sur GitHub", "discret")
+            b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(info["page"])))
+            h.addWidget(b)
         h.addStretch(1)
         self.b_plus_tard = Bouton("Plus tard", "discret")
         self.b_plus_tard.clicked.connect(self.reject)
@@ -1096,7 +1097,8 @@ class FenetrePrincipale(QMainWindow):
             if manuel:
                 self.toast(f"Mises à jour : {msg}", "erreur")
 
-        if not mise_a_jour.depot(self.cfg):
+        from . import nuage
+        if not mise_a_jour.depot(self.cfg) and not nuage.disponible(self.cfg):
             if manuel:
                 self.toast("Indiquez le dépôt GitHub dans Réglages › Mises à jour.", "erreur")
                 self.aller("reglages")

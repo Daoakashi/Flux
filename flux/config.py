@@ -17,7 +17,7 @@ FICHIER_VERSION = os.path.join(RACINE, "version.json")
 
 def lire_version(chemin=FICHIER_VERSION):
     """version.json : numéro de version, canal (alpha, beta, stable) et dépôt GitHub des mises à jour."""
-    d = {"version": "0.3.0", "canal": "alpha", "depot": "", "date": ""}
+    d = {"version": "0.3.0", "canal": "alpha", "depot": "", "date": "", "nuage": ""}
     try:
         with open(chemin, encoding="utf-8") as f:
             lu = json.load(f)
@@ -391,8 +391,8 @@ SCHEMA = [
       "Flux, sans rien ouvrir dans la box. Les échanges restent chiffrés de bout en bout : le relais ne voit ni les "
       "images ni les mots de passe.", groupe="Accès hors WiFi"),
     R("fluxlite.relais_adresse", "fluxlite", "Adresse du relais", "texte", "",
-      "Vide = le relais publié sur le site de Flux. Sinon, l'adresse de votre propre relais, ex. "
-      "« relais.monentreprise.be » ou « 203.0.113.5:8443 »."),
+      "Vide = le serveur Flux (Cloudflare), à défaut le relais publié sur le site de Flux. Pour votre propre relais : "
+      "« wss://relais.monentreprise.be » (Cloudflare), « relais.monentreprise.be » ou « 203.0.113.5:8443 »."),
     R("fluxlite.inscription", "fluxlite", "Inscriptions depuis le téléphone", "bool", True,
       "Désactivé : seuls les comptes créés dans la page FluxLite peuvent se connecter.", groupe="Comptes"),
     R("fluxlite.validation_manuelle", "fluxlite", "Valider chaque nouveau compte", "bool", True,
@@ -491,7 +491,15 @@ SCHEMA = [
 
     # --- Mises à jour --------------------------------------------------------------------
     R("maj.auto", "maj", "Vérifier au démarrage", "bool", True,
-      "Cherche une nouvelle version sur GitHub à chaque lancement (quelques Ko, aucune donnée envoyée)."),
+      "Cherche une nouvelle version à chaque lancement (quelques Ko, aucune donnée envoyée)."),
+    R("maj.source", "maj", "Source des mises à jour", "choix", "auto",
+      "Serveur Flux (Cloudflare) : versions signées, vérifiées par Flux avant installation. En automatique, GitHub "
+      "sert de secours si le serveur Flux ne répond pas.",
+      [("auto", "Automatique (serveur Flux, sinon GitHub)"), ("nuage", "Serveur Flux uniquement"),
+       ("github", "GitHub uniquement")]),
+    R("maj.nuage", "maj", "Adresse du serveur Flux", "texte", "",
+      "Vide = adresse officielle (livrée avec Flux, et mise à jour par le serveur lui-même s'il déménage). "
+      "Ex. « https://flux.monentreprise.be ». Sert aussi de relais 4G pour FluxLite et Flux Remote.", avance=True),
     R("maj.canal", "maj", "Versions proposées", "choix", "toutes",
       "« Stables » ignore les versions alpha et beta.",
       [("toutes", "Toutes (alpha, beta, stables)"), ("beta", "Beta et stables"), ("stables", "Stables uniquement")]),

@@ -97,9 +97,20 @@ def entete_maj(page):
     from .mise_a_jour import depot
     fen, cfg = page.fen, page.cfg
     w, v = _boite()
+    from . import nuage
     d = depot(cfg)
     v.addWidget(etiquette(f"Version installée : {libelle_version(config.APP_VERSION, config.APP_CANAL)}"
                           + (f" · dépôt : github.com/{d}" if d else " · aucun dépôt GitHub configuré")))
+    serveur = nuage.adresse(cfg)
+    if not serveur:
+        texte = "Serveur Flux : aucun pour l'instant (les mises à jour viennent de GitHub)."
+    elif not nuage.cles_confiance():
+        texte = (f"Serveur Flux : {serveur} · clé de vérification absente de cette copie (installation depuis le "
+                 "code source) : GitHub est utilisé.")
+    else:
+        texte = (f"Serveur Flux : {serveur} · versions signées, vérifiées avant installation · "
+                 "relais 4G pour FluxLite et Flux Remote.")
+    v.addWidget(etiquette(texte))
     h = Rangee()
     b = Bouton("Rechercher maintenant", "primaire")
     b.clicked.connect(lambda: fen.verifier_mises_a_jour(manuel=True))
@@ -178,7 +189,8 @@ def entete_developpeur(page):
     h2 = Rangee()
     for texte, f in (("Modifier config.json…", lambda: DialogueJson(fen).exec()),
                      ("Ouvrir le dossier de Flux", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(RACINE))),
-                     ("Préparer une publication (.zip)", lambda: _publication(fen))):
+                     ("Préparer une publication (.zip)", lambda: _publication(fen)),
+                     ("Secrets du serveur Flux (Cloudflare)…", lambda: DialogueSecretsServeur(fen).exec())):
         b = Bouton(texte, "discret")
         b.clicked.connect(f)
         h2.addWidget(b)
@@ -199,6 +211,85 @@ def _publication(fen):
         QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(chemins[0])))
 
     fen._tache_pub = en_arriere_plan(preparer_publication, fini, lambda e: fen.toast(f"Publication : {e}", "erreur"))
+
+
+class DialogueSecretsServeur(QDialog):
+    """Crée en une fois les secrets du serveur Flux (Cloudflare) et de la publication signée des mises à jour.
+
+    Rien n'est enregistré ni envoyé : les valeurs sont affichées une seule fois, à coller dans les secrets GitHub.
+    """
+
+    def __init__(self, fen):
+        import secrets as alea
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from PySide6.QtWidgets import QApplication, QScrollArea
+        super().__init__(fen)
+        self.setWindowTitle("Secrets du serveur Flux")
+        self.resize(860, 660)
+        cle = ec.generate_private_key(ec.SECP256R1())
+        pem = cle.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                serialization.NoEncryption()).decode()
+        publication = alea.token_urlsafe(32)
+        valeurs = [
+            ("Dépôt PRIVÉ flux-central › Secrets", [
+                ("MASTER_KEY", alea.token_urlsafe(32), "chiffre les secrets de la console"),
+                ("SETUP_TOKEN", alea.token_urlsafe(24), "création du premier administrateur de la console"),
+                ("PUBLICATION_TOKEN", publication, "autorise la publication des mises à jour"),
+                ("CLOUDFLARE_API_TOKEN", "", "à créer sur dash.cloudflare.com › My Profile › API Tokens "
+                                             "(modèle « Edit Cloudflare Workers »)"),
+                ("CLOUDFLARE_ACCOUNT_ID", "", "visible sur dash.cloudflare.com › Workers & Pages (colonne de droite)"),
+            ]),
+            ("Dépôt de Flux (Daoakashi/Flux) › Secrets", [
+                ("PUBLICATION_TOKEN", publication, "la même valeur que ci-dessus"),
+                ("FLUX_MAJ_CLE", pem, "signe les mises à jour ; ne la donnez à personne"),
+            ]),
+            ("Dépôt de Flux › Variables (onglet Variables, pas Secrets)", [
+                ("FLUX_NUAGE_URL", "", "adresse donnée par le premier déploiement, ex. "
+                                       "https://flux-central.votrenom.workers.dev"),
+            ]),
+        ]
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 14)
+        t = QLabel("Secrets du serveur Flux")
+        t.setObjectName("titre")
+        v.addWidget(t)
+        v.addWidget(etiquette(
+            "Valeurs créées sur ce PC, affichées une seule fois et jamais enregistrées. Sur GitHub : dépôt › Settings › "
+            "Secrets and variables › Actions › New repository secret. Collez chaque valeur sous le nom indiqué. "
+            "Ne les envoyez à personne (ni par mail, ni dans une discussion)."))
+        zone = QScrollArea()
+        zone.setWidgetResizable(True)
+        contenu = QWidget()
+        cv = QVBoxLayout(contenu)
+        cv.setSpacing(6)
+        for titre, lignes in valeurs:
+            cv.addSpacing(8)
+            cv.addWidget(etiquette(titre.upper(), "section"))
+            for nom, valeur, aide in lignes:
+                ligne = Rangee()
+                lab = QLabel(nom)
+                lab.setMinimumWidth(190)
+                lab.setStyleSheet("font-weight: 700;")
+                ligne.addWidget(lab)
+                if valeur:
+                    b = Bouton("Copier", "discret")
+                    b.clicked.connect(lambda _c=False, x=valeur, n=nom: (
+                        QApplication.clipboard().setText(x), fen.toast(f"{n} copié.", "ok")))
+                    ligne.addWidget(b)
+                ligne.addWidget(etiquette(aide))
+                cv.addLayout(ligne)
+        cv.addStretch(1)
+        zone.setWidget(contenu)
+        v.addWidget(zone, 1)
+        v.addWidget(etiquette("Fermer cette fenêtre efface les valeurs : rouvrez-la pour en créer de nouvelles (il "
+                              "faudra alors remplacer TOUS les secrets ci-dessus)."))
+        h = QHBoxLayout()
+        h.addStretch(1)
+        bf = Bouton("Fermer", "primaire")
+        bf.clicked.connect(self.accept)
+        h.addWidget(bf)
+        v.addLayout(h)
 
 
 class DialogueJson(QDialog):

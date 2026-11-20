@@ -2,7 +2,7 @@
 
 Surveillance vidéo intelligente pour Windows et Linux : détection des personnes et des véhicules (YOLO26, RT-DETR), reconnaissance des visages, lecture des plaques, zones, alertes par mail et sur téléphone, vidéos des passages, groupes de caméras.
 
-**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.11.2 alpha** · [Notes de version](CHANGELOG.txt)
+**Site officiel : [daoakashi.github.io](https://daoakashi.github.io/flux-web)** · **Version actuelle : 0.12.0 alpha** · [Notes de version](CHANGELOG.txt)
 
 ## Installation
 
@@ -16,9 +16,11 @@ Guides détaillés : [LISEZMOI.txt](LISEZMOI.txt) (Windows) et [LISEZMOI-LINUX.t
 
 ## Mises à jour
 
-Flux vérifie ce dépôt au démarrage et propose les nouvelles versions : Réglages › Mises à jour. Vos réglages, votre base de données, vos modèles et la clé FluxLite ne sont jamais remplacés. Si une version ajoute des modules Python, Flux les installe lui-même (pas besoin de relancer l'installateur, même en mode kiosque).
+Flux vérifie au démarrage le **serveur Flux** (Cloudflare) et, en secours, ce dépôt GitHub, puis propose les nouvelles versions : Réglages › Mises à jour. Les versions du serveur Flux sont **signées** : Flux vérifie la signature et l'empreinte de chaque archive avant de l'installer. Vos réglages, votre base de données, vos modèles et la clé FluxLite ne sont jamais remplacés. Si une version ajoute des modules Python, Flux les installe lui-même (pas besoin de relancer l'installateur, même en mode kiosque).
 
-**Publier une version** : mettez à jour `version.json`, ajoutez les notes en haut de `CHANGELOG.txt`, puis onglet **Actions › Publier une version de Flux › Run workflow**.
+**Publier une version** : mettez à jour `version.json`, ajoutez les notes en haut de `CHANGELOG.txt`, puis onglet **Actions › Publier une version de Flux › Run workflow**. La version part sur GitHub et, si les secrets `FLUX_MAJ_CLE` et `PUBLICATION_TOKEN` et la variable `FLUX_NUAGE_URL` sont définis, sur le serveur Flux (créez-les avec Réglages › Développeur › « Secrets du serveur Flux »).
+
+**Accès 4G** : hors WiFi, FluxLite et Flux Remote joignent le PC Flux par le relais du serveur Flux (Cloudflare), sans rien ouvrir sur la box. Le chiffrement reste de bout en bout.
 
 ## FluxLite (application Android)
 

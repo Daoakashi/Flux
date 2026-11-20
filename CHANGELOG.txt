@@ -1,3 +1,19 @@
+Beta Version 0.12.0 alpha
++ Ajouts
+  - Serveur Flux sur Cloudflare (Flux Central) : nouvelle source des mises à jour. Chaque version y est
+    publiée avec un manifeste SIGNÉ (clé ECDSA gardée dans GitHub, jamais sur le serveur) ; Flux vérifie la
+    signature et l'empreinte de l'archive avant d'installer. Un serveur piraté ne peut ni proposer une fausse
+    version, ni rejouer un ancien manifeste. GitHub reste le secours automatique.
+  - Le serveur peut déménager (passage à un nom de domaine) : il annonce sa nouvelle adresse dans le manifeste
+    signé et tous les PC Flux suivent, sans réglage.
+  - Accès 4G par Cloudflare : le relais hors WiFi de FluxLite et Flux Remote passe par le serveur Flux. Rien à
+    ouvrir sur la box, aucun serveur à louer ; le chiffrement reste de bout en bout (Cloudflare ne voit ni les
+    images ni les mots de passe). Le lien d'appairage indique ce relais aux téléphones.
+  - Réglages › Mises à jour : source (automatique, serveur Flux, GitHub) et adresse du serveur.
+  - Réglages › Développeur › « Secrets du serveur Flux » : crée en un clic les secrets à coller dans GitHub.
+* Divers
+  - Nouveau module websocket-client, installé tout seul au démarrage.
+
 Beta Version 0.11.2 alpha
 + Ajouts
   - Mode kiosque sans terminal : Réglages › Mode kiosque (Linux) permet d'activer le kiosque (code

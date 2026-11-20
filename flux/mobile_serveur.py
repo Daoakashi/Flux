@@ -767,7 +767,11 @@ class RefusRelais(Exception):
 
 
 def lire_adresse_relais(texte, port_defaut=PORT_RELAIS):
-    """« relais.exemple.be », « relais.exemple.be:8443 », « 1.2.3.4:443 », « [2001:db8::1]:443 » -> (hôte, port)."""
+    """« relais.exemple.be », « relais.exemple.be:8443 », « 1.2.3.4:443 », « [2001:db8::1]:443 » -> (hôte, port).
+    « wss://… » (relais sur Cloudflare) -> AdresseWs (même tuple, joint en WebSocket)."""
+    from .pont_ws import lire_adresse_ws
+    if str(texte or "").strip().lower().startswith(("wss://", "ws://")):
+        return lire_adresse_ws(texte)
     t = str(texte or "").strip()
     for prefixe in ("https://", "http://", "fluxrelais://"):
         if t.lower().startswith(prefixe):
@@ -794,6 +798,8 @@ def lire_adresse_relais(texte, port_defaut=PORT_RELAIS):
 def texte_adresse(adresse):
     if not adresse:
         return ""
+    if getattr(adresse, "ws", False):
+        return adresse.texte()
     hote, port = adresse
     hote = f"[{hote}]" if ":" in hote else hote
     return hote if port == PORT_RELAIS else f"{hote}:{port}"
@@ -883,8 +889,10 @@ class AgentRelais:
                 import urllib.request
                 with urllib.request.urlopen(SITE_RELAIS, timeout=15) as r:
                     d = json.loads(r.read(65536).decode("utf-8"))
-                lue = lire_adresse_relais(d.get("hote") or "", d.get("port") or PORT_RELAIS) \
-                    if isinstance(d, dict) and d.get("actif", True) else None
+                lue = None
+                if isinstance(d, dict) and d.get("actif", True):  # « url » : relais Cloudflare (wss://…)
+                    lue = lire_adresse_relais(d.get("url") or "") or \
+                        lire_adresse_relais(d.get("hote") or "", d.get("port") or PORT_RELAIS)
                 self._site = (lue, time.time())
                 tmp = self._fichier_site + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as f:
@@ -895,10 +903,26 @@ class AgentRelais:
                 pass
         return adresse
 
+    def adresse_nuage(self):
+        """Relais du serveur Flux (Cloudflare) : wss://<serveur>/relais."""
+        try:
+            from . import nuage
+            return lire_adresse_relais(nuage.adresse_relais(self.serveur.reglages))
+        except Exception:  # noqa: BLE001 - réglages illisibles : pas de serveur Flux
+            return None
+
+    def adresse_annoncee(self):
+        """Relais à indiquer aux téléphones (lien d'appairage, /info) : choisi à la main, sinon celui du serveur Flux.
+        Vide = le téléphone prend celui publié sur le site."""
+        return self.adresse_manuelle() or self.adresse_nuage()
+
     def trouver_adresse(self, forcer=False):
         manuelle = self.adresse_manuelle()
         if manuelle:
             return manuelle, "manuel"
+        cloud = self.adresse_nuage()
+        if cloud:
+            return cloud, "nuage"
         return self.adresse_du_site(forcer), "site"
 
     # --- boucle de connexion ------------------------------------------------------------------
@@ -939,6 +963,9 @@ class AgentRelais:
                     self.connecte_depuis = None
 
     def _connecter(self, adresse):
+        if getattr(adresse, "ws", False):  # relais sur Cloudflare : WebSocket, vue comme une socket ordinaire
+            from . import pont_ws
+            return pont_ws.ouvrir(adresse, self.serveur.identite.cle, delai=15)
         s = socket.create_connection(adresse, timeout=15)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -972,7 +999,9 @@ class AgentRelais:
             if self._perdu_depuis is None or time.time() - self._perdu_depuis > 120:
                 self.serveur.rappel(f"Accès hors WiFi actif (relais {texte_adresse(adresse)}).", "info")
             self._perdu_depuis = None
-            s.settimeout(SILENCE_RELAIS)
+            # Relais Cloudflare : pas de PING du relais (il dort entre deux connexions), le pont WebSocket surveille
+            # lui-même la liaison et ferme la socket si elle se perd.
+            s.settimeout(None if getattr(adresse, "ws", False) else SILENCE_RELAIS)
             while not arret.is_set():
                 ligne = _lire_ligne(s)
                 if ligne == "PING":
@@ -1196,8 +1225,8 @@ class ServeurFluxLite:
             self.relais.arreter()
 
     def lien(self, adresses, port):
-        manuelle = self.relais.adresse_manuelle()
-        return self.identite.lien_appairage(adresses, port, self.nom, texte_adresse(manuelle) if manuelle else "")
+        annoncee = self.relais.adresse_annoncee()
+        return self.identite.lien_appairage(adresses, port, self.nom, texte_adresse(annoncee) if annoncee else "")
 
     def arreter(self):
         self.relais.arreter()
@@ -1600,7 +1629,7 @@ class _Gestionnaire(BaseHTTPRequestHandler):
                    "responsable": (a.r("responsable", "") or "").strip(), "contact": (a.r("contact", "") or "").strip(),
                    "conservation_journal": int(a.r("conservation_journal", 7)),
                    # relais choisi à la main (vide = celui du site) : l'appli le retient pour l'accès hors WiFi
-                   "relais": texte_adresse(a.relais.adresse_manuelle()) if a.r("relais", True) else "",
+                   "relais": texte_adresse(a.relais.adresse_annoncee()) if a.r("relais", True) else "",
                    "relais_actif": bool(a.r("relais", True)), "web": bool(a.r("web", True))})
 
     def inscription(self):

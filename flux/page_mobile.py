@@ -896,7 +896,7 @@ class PageFluxLite(QWidget):
         else:
             r = self.serveur.relais.resume()
             if r["etat"] == "connecte":
-                origine = "relais du site" if r["source"] == "site" else "votre relais"
+                origine = {"site": "relais du site", "nuage": "serveur Flux"}.get(r["source"], "votre relais")
                 texte = (f"● Joignable par Internet · {origine} {r['adresse']}"
                          + (f" · {r['relayees']} connexion(s) relayée(s)" if r["relayees"] else ""))
                 c = "succes"

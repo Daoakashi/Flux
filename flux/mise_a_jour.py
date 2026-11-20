@@ -75,9 +75,9 @@ def depot(cfg):
     return d if re.fullmatch(r"[\w.-]+/[\w.-]+", d) else ""
 
 
-def _get(url, cfg, binaire=False, delai=20, progression=None):
+def _get(url, cfg, binaire=False, delai=20, progression=None, github=True):
     entetes = {"User-Agent": "Flux-mises-a-jour", "Accept": "application/vnd.github+json"}
-    if (cfg.get("maj.jeton") or "").strip():
+    if github and (cfg.get("maj.jeton") or "").strip():  # le jeton GitHub ne part jamais vers un autre serveur
         entetes["Authorization"] = f"Bearer {cfg.get('maj.jeton').strip()}"
     if binaire:
         entetes["Accept"] = "application/octet-stream"
@@ -97,15 +97,17 @@ def _get(url, cfg, binaire=False, delai=20, progression=None):
                     progression(lu, total)
             return b"".join(morceaux)
     except urllib.error.HTTPError as e:
+        if not github:
+            raise ErreurMaj(f"le serveur Flux a répondu {e.code}") from None
         if e.code == 404:
             raise ErreurMaj("dépôt introuvable (nom incorrect, ou dépôt privé sans jeton)") from None
         if e.code == 403:
             raise ErreurMaj("GitHub limite les requêtes : réessayez dans une heure") from None
         raise ErreurMaj(f"GitHub a répondu {e.code}") from None
     except urllib.error.URLError as e:
-        raise ErreurMaj(f"pas de connexion à GitHub ({e.reason})") from None
+        raise ErreurMaj(f"pas de connexion à {'GitHub' if github else 'au serveur Flux'} ({e.reason})") from None
     except TimeoutError:
-        raise ErreurMaj("GitHub ne répond pas") from None
+        raise ErreurMaj(f"{'GitHub' if github else 'le serveur Flux'} ne répond pas") from None
 
 
 def canal_accepte(cfg, rang):
@@ -114,7 +116,44 @@ def canal_accepte(cfg, rang):
 
 
 def verifier(cfg):
-    """Cherche une version plus récente. Renvoie None (à jour) ou un dict décrivant la nouvelle version."""
+    """Cherche une version plus récente. Renvoie None (à jour) ou un dict décrivant la nouvelle version.
+
+    Source : le serveur Flux (Cloudflare, manifeste signé) d'abord, GitHub en secours (Réglages › Mises à jour)."""
+    from . import nuage
+    source = cfg.get("maj.source") or "auto"
+    if source in ("auto", "nuage"):
+        if nuage.disponible(cfg):
+            try:
+                return _verifier_nuage(cfg)
+            except nuage.ErreurNuage as e:
+                if source == "nuage":
+                    raise ErreurMaj(str(e)) from None
+                print(f"[Flux] Mises à jour : {e} ; GitHub utilisé en secours.", flush=True)
+        elif source == "nuage":
+            raise ErreurMaj("aucun serveur Flux configuré (Réglages › Mises à jour › Adresse du serveur Flux)")
+    return _verifier_github(cfg)
+
+
+def _verifier_nuage(cfg):
+    from . import nuage
+    actuelle = (config.APP_VERSION, config.APP_CANAL)
+    meilleure = None
+    for c in nuage.candidates(cfg, plateformes.actuelle()):
+        cle = cle_version(c["version"], c["canal"])
+        if not c["version"] or not canal_accepte(cfg, cle[3]):
+            continue
+        if meilleure is None or cle > meilleure["cle"]:
+            meilleure = dict(c, cle=cle)
+    if meilleure is None or meilleure["cle"] <= cle_version(*actuelle):
+        return None
+    meilleure["libelle"] = config.libelle_version(*_version_et_canal(meilleure["cle"], meilleure["version"]))
+    meilleure["titre"] = meilleure["titre"] or f"Version {meilleure['libelle']}"
+    meilleure["source"] = "nuage"
+    meilleure["depot"] = depot(cfg)
+    return meilleure
+
+
+def _verifier_github(cfg):
     d = depot(cfg)
     if not d:
         raise ErreurMaj("aucun dépôt GitHub configuré (Réglages › Mises à jour)")
@@ -224,11 +263,19 @@ def installer(cfg, info, racine=config.RACINE, progression=None):
             progression(texte, avance)
 
     etape("Téléchargement…", 0.05)
-    octets = _get(info["archive"], cfg, binaire=True, delai=60,
+    nuage_ = info.get("source") == "nuage"
+    octets = _get(info["archive"], cfg, binaire=True, delai=60, github=not nuage_,
                   progression=lambda lu, total: etape(
                       f"Téléchargement… {lu / 1e6:.1f} Mo" + (f" / {total / 1e6:.1f} Mo" if total else ""),
                       0.05 + 0.55 * (lu / total if total else 0.3)))
-    if info.get("sommes") and info.get("archive_nom"):
+    if nuage_:
+        # Empreinte prise dans le manifeste SIGNÉ : une archive modifiée sur le serveur est refusée
+        etape("Vérification de l'archive…", 0.6)
+        if not re.fullmatch(r"[0-9a-f]{64}", str(info.get("sha256", ""))) \
+                or hashlib.sha256(octets).hexdigest() != info["sha256"]:
+            raise ErreurMaj("l'archive téléchargée ne correspond pas à la version signée (empreinte SHA-256 "
+                            "différente) : rien n'a été installé")
+    elif info.get("sommes") and info.get("archive_nom"):
         etape("Vérification de l'archive…", 0.6)
         attendue = empreinte_attendue(_get(info["sommes"], cfg, binaire=True).decode("utf-8", "replace"),
                                       info["archive_nom"])

@@ -1,8 +1,9 @@
 # Bouton « Publier une version » : onglet Actions du dépôt › Publier une version de Flux › Run workflow.
 # Avant : mettez à jour version.json et ajoutez les notes en haut de CHANGELOG.txt.
 # Résultat : une « release » GitHub avec deux archives, Flux-x.y.z-windows.zip et Flux-x.y.z-linux.zip. Chaque PC
-# Flux prend celle de son système
-# (Réglages › Mises à jour) et le site affiche un bouton par système dans la page Télécharger.
+# Flux prend celle de son système (Réglages › Mises à jour) et le site affiche un bouton par système dans la page
+# Télécharger. Si le serveur Flux est configuré, les mêmes archives partent aussi sur le serveur Flux (Cloudflare)
+# avec un manifeste signé : voir .github/scripts/publier_nuage.py.
 name: Publier une version de Flux
 
 on:
@@ -30,6 +31,15 @@ jobs:
             exit 1
           fi
 
+      - name: Préparer le serveur Flux (adresse et clé de vérification dans le code livré)
+        env:
+          FLUX_MAJ_CLE: ${{ secrets.FLUX_MAJ_CLE }}
+          PUBLICATION_TOKEN: ${{ secrets.PUBLICATION_TOKEN }}
+          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL }}
+        run: |
+          pip install --quiet "cryptography>=42"
+          python3 .github/scripts/publier_nuage.py preparer
+
       - name: Créer les archives Windows et Linux
         run: python3 .github/scripts/archives.py
 
@@ -40,3 +50,12 @@ jobs:
           gh release create "${{ steps.v.outputs.tag }}" Flux-*-windows.zip Flux-*-linux.zip SHA256SUMS.txt \
             --title "${{ steps.v.outputs.titre }}" --notes-file notes.md --target "${{ github.sha }}" \
             ${{ steps.v.outputs.prerelease }}
+
+      - name: Publier sur le serveur Flux (Cloudflare, manifeste signé)
+        env:
+          FLUX_MAJ_CLE: ${{ secrets.FLUX_MAJ_CLE }}
+          PUBLICATION_TOKEN: ${{ secrets.PUBLICATION_TOKEN }}
+          FLUX_NUAGE_URL: ${{ vars.FLUX_NUAGE_URL }}
+          FLUX_TAG: ${{ steps.v.outputs.tag }}
+          FLUX_TITRE: ${{ steps.v.outputs.titre }}
+        run: python3 .github/scripts/publier_nuage.py envoyer
