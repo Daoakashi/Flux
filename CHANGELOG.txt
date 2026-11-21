@@ -1,3 +1,8 @@
+Beta Version 0.13.1 alpha
+* Divers
+  - Nouvelle clé de signature DMS Security (mises à jour et plugins). Les PC en 0.13.0 reçoivent cette version
+    par GitHub, puis reviennent sur le serveur Flux.
+
 Beta Version 0.13.0 alpha
 + Ajouts
   - Nouvel onglet Plugins : des modules de surveillance avancée s'ajoutent à Flux sans alourdir le programme.
