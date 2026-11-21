@@ -473,6 +473,16 @@ def dessiner_icone(p, nom, rect, couleur_, epaisseur=1.7):
         pp.moveTo(12.5, 4.5)
         pp.lineTo(19.5, 4.5)
         pp.lineTo(19.5, 11.5)
+    elif nom == "plugin":  # pièce de puzzle
+        pp.moveTo(5, 8)
+        pp.lineTo(9, 8)
+        pp.cubicTo(9, 4.5, 14, 4.5, 14, 8)
+        pp.lineTo(18, 8)
+        pp.lineTo(18, 12)
+        pp.cubicTo(21.5, 12, 21.5, 17, 18, 17)
+        pp.lineTo(18, 20)
+        pp.lineTo(5, 20)
+        pp.lineTo(5, 8)
     elif nom == "bouclier":  # pare-feu
         pp.moveTo(12, 3)
         pp.lineTo(19.5, 6)

@@ -48,6 +48,11 @@ TYPES = [
     ("identification", "Personne reconnue", "UA", "150", False, False, False),
     ("apparition", "Personne apparue", "UA", "150", False, False, False),
     ("depart", "Personne partie", "UA", "150", False, False, False),
+    # Envoyés par les plugins (ex. clavier d'armement), qui peuvent préciser leur propre code et zone
+    ("intrusion", "Intrusion dans un secteur armé (plugin)", "BA", "130", True, True, True),
+    ("contrainte", "Code de contrainte : alarme silencieuse (plugin)", "HA", "121", True, False, False),
+    ("armement", "Armement et désarmement des secteurs (plugin)", "CL", "401", True, False, False),
+    ("contact", "Contact ou entrée déclenché (plugin)", "BA", "130", False, False, False),
 ]
 LIBELLES = {t[0]: t[1] for t in TYPES}
 CODE_TEST_MANUEL = ("RX", "601")
@@ -405,7 +410,8 @@ class Centrale:
         if el["etape"] == "alarme":
             proto = self.c.get("protocole", "SIA-DCS")
             compte = compte_valide(self.c.get("compte"))
-            donnees = donnees_evenement(proto, compte, el["sia"], el["cid"], el["zone"], self.c.get("partition", 1))
+            donnees = donnees_evenement(proto, compte, el["sia"], el["cid"], el["zone"], self.c.get("partition", 1),
+                                        el.get("retour", False))
             fichier = el.get("fichier_image") or el.get("fichier_video")
             if proto == "ADM-CID":
                 # beaucoup de récepteurs Contact ID n'acceptent qu'un bloc de données étendues : le plus utile
@@ -510,6 +516,9 @@ def config_defaut():
 
 def classer(e):
     """Événement du journal de Flux -> type de télésurveillance (ou None)."""
+    tele = e.get("tele")
+    if isinstance(tele, dict) and tele.get("type") in LIBELLES:  # envoyé par un plugin, quel que soit le niveau
+        return tele["type"]
     niveau, ta = e.get("niveau"), e.get("type_action")
     if niveau == "alerte":
         return ta if ta in ("liste_noire", "ivs") else "alerte"
@@ -686,6 +695,10 @@ class Telesurveillance:
         if not reglage.get("actif"):
             return
         camera = str(e.get("source") or "")
+        tele = e.get("tele") if isinstance(e.get("tele"), dict) else {}
+        if tele.get("sia") or tele.get("cid"):  # codes choisis par le plugin (ex. OP/CL pour désarmer/armer)
+            reglage = dict(reglage, sia=tele.get("sia") or reglage.get("sia"), cid=tele.get("cid") or reglage.get("cid"))
+        zone_imposee = tele.get("zone")
         maintenant = datetime.now()
         spool_image = None
         if reglage.get("image") and e.get("jpeg"):
@@ -701,11 +714,13 @@ class Telesurveillance:
                 code = reglage.get("sia") if c.get("protocole") != "ADM-CID" else reglage.get("cid")
                 valeurs = {"compte": (c.get("compte") or "").upper(), "date": maintenant.strftime("%Y%m%d"),
                            "heure": maintenant.strftime("%H%M%S"), "camera": ascii_propre(camera, 40) or "camera",
-                           "code": code, "type": typ, "zone": f"{self.zone(camera):03d}"}
+                           "code": code, "type": typ,
+                           "zone": f"{int(zone_imposee) if zone_imposee is not None else self.zone(camera):03d}"}
                 avec_fichiers = (c.get("fichiers") or {}).get("methode", "aucune") != "aucune"
                 el = {"id": uuid.uuid4().hex, "centrale": c["id"], "type": typ, "etape": "alarme", "essais": 0,
                       "cree": time.time(), "sia": reglage.get("sia") or "UA", "cid": reglage.get("cid") or "150",
-                      "zone": self.zone(camera), "camera": camera, "texte": e.get("texte", ""), "valeurs": valeurs,
+                      "zone": int(zone_imposee) if zone_imposee is not None else self.zone(camera), "camera": camera,
+                      "retour": bool(tele.get("retour")), "texte": e.get("texte", ""), "valeurs": valeurs,
                       "fichier_image": nom_fichier((c.get("fichiers") or {}).get("modele"), valeurs, "jpg")
                       if spool_image and avec_fichiers else None,
                       "spool_image": spool_image if avec_fichiers else None,

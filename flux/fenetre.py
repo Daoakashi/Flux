@@ -35,7 +35,7 @@ from . import kiosque
 PAGES = [("cameras", "Caméras", "cameras"), ("lecteur", "Lecteur", "lecteur"), ("personnes", "Personnes", "personnes"),
          ("journal", "Journal", "journal"), ("frequentation", "Fréquentation", "frequentation"),
          ("mobile", "FluxLite", "telephone"), ("telesurveillance", "Télésurveillance", "bouclier"),
-         ("reglages", "Réglages", "reglages")]
+         ("plugins", "Plugins", "plugin"), ("reglages", "Réglages", "reglages")]
 
 
 # ---------------------------------------------------------------------------
@@ -622,15 +622,20 @@ class FenetrePrincipale(QMainWindow):
         self.page_telesurveillance = PageTelesurveillance(self)
         from .page_frequentation import PageFrequentation
         self.page_frequentation = PageFrequentation(self)
+        from .plugins import Gestionnaire
+        from .page_plugins import PagePlugins
+        self.plugins = Gestionnaire(self)
+        self.page_plugins = PagePlugins(self)
         self.page_reglages = PageReglages(self)
         self.pages = {"cameras": self.page_cameras, "lecteur": self.page_lecteur, "personnes": self.page_personnes,
                       "journal": self.page_journal, "frequentation": self.page_frequentation,
                       "mobile": self.page_mobile, "telesurveillance": self.page_telesurveillance,
-                      "reglages": self.page_reglages}
+                      "plugins": self.page_plugins, "reglages": self.page_reglages}
         for p in self.pages.values():
             self.pile.addWidget(p)
         zv.addWidget(self.pile)
         h.addWidget(zone, 1)
+        QTimer.singleShot(0, self.plugins.charger_tous)  # vérifiés (signature) puis chargés en mémoire
 
         sb = QStatusBar()
         self.setStatusBar(sb)
@@ -1259,6 +1264,16 @@ class FenetrePrincipale(QMainWindow):
                 e = self.evenements.get_nowait()
             except queue.Empty:
                 break
+            e = self.plugins.filtrer(e)  # un plugin peut modifier ou retenir l'événement (ex. secteur désarmé)
+            if e is None:
+                continue
+            if e.get("silencieux"):  # ex. code de contrainte : rien de visible ici (ni journal, ni téléphones)
+                self.central.evenement(e)
+                try:
+                    self.telesurveillance.evenement(e)
+                except Exception as ex:  # noqa: BLE001
+                    self.log_systeme(f"Télésurveillance : {ex}", "erreur")
+                continue
             self._journaliser(e)
             self.page_mobile.evenement(e)
             self.central.evenement(e)
@@ -1314,6 +1329,10 @@ class FenetrePrincipale(QMainWindow):
         e.accept()
 
     def arret_propre(self):
+        try:
+            self.plugins.arreter_tous()
+        except Exception:  # noqa: BLE001
+            pass
         self._timer.stop()
         self._timer_stats.stop()
         if not self.isFullScreen() and not self.isMaximized():

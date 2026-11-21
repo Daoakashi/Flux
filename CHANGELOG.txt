@@ -1,3 +1,16 @@
+Beta Version 0.13.0 alpha
++ Ajouts
+  - Nouvel onglet Plugins : des modules de surveillance avancée s'ajoutent à Flux sans alourdir le programme.
+    Gestionnaire (installer, activer, désactiver, désinstaller), catalogue DMS Security du serveur Flux, et
+    une page par plugin dans l'onglet.
+  - Format .fluxplug, lisible seulement par Flux : contenu chiffré, signé par l'éditeur. Flux refuse tout plugin
+    modifié ou d'un éditeur inconnu ; le code n'est jamais écrit en clair sur le disque (chargé en mémoire).
+    Aujourd'hui seul DMS Security signe des plugins ; des partenaires pourront être ajoutés plus tard.
+  - Un plugin qui plante est mis de côté sans faire tomber Flux.
+  - Télésurveillance : nouveaux événements envoyés par les plugins (intrusion, contrainte, armement /
+    désarmement, contact).
+* Premier plugin (à installer depuis l'onglet Plugins) : Clavier d'armement.
+
 Beta Version 0.12.1 alpha
 + Ajouts
   - Première version livrée avec l'adresse du serveur Flux (Cloudflare) et la clé de vérification des
